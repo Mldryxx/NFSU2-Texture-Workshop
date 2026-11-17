@@ -1,0 +1,30 @@
+name: Build NFSU2 Texture Workshop WebAssembly
+on:
+  push:
+    paths:
+      - "web/**"
+      - ".github/workflows/web-engine.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Build WebAssembly engine
+        working-directory: web/engine
+        run: wasm-pack build --target web --release --out-dir ../site/pkg
+      - name: Upload web app
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFSU2-Texture-Workshop-Web
+          path: web/site/
+          if-no-files-found: error
+          retention-days: 14

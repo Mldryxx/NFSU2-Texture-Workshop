@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn jdlz_near_back_reference() {
         let mut v = header(b"JDLZ", 4, 20);
-        v.extend_from_slice(&[0b0000_0010, 1, b'A', 0, 0]);
+        v.extend_from_slice(&[0b0000_0010, 0b0000_0010, b'A', 0, 0]);
         assert_eq!(decompress(&v, 1024).unwrap(), b"AAAA");
     }
 

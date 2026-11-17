@@ -75,8 +75,9 @@ fn decompress_jdlz(src: &[u8], out_len: usize) -> Result<Vec<u8>, CodecError> {
                 ((((b0 as usize & 0xF0) << 4) | b1 as usize) + 3,
                  (b0 as usize & 0x0F) + 1)
             } else {
-                (((b0 as usize & 0x1F) + 3,
-                  ((b0 as usize & 0xE0) << 3 | b1 as usize) + 17)
+                let length = (b0 as usize & 0x1F) + 3;
+                let distance = (((b0 as usize & 0xE0) << 3) | b1 as usize) + 17;
+                (length, distance)
             };
 
             if distance == 0 || distance > out.len() {

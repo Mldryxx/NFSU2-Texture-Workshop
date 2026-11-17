@@ -1,0 +1,32 @@
+name: Darius codec checks
+
+on:
+  push:
+    branches:
+      - binarius-engine-port
+    paths:
+      - "web/engine-port/**"
+      - ".github/workflows/darius-codec.yml"
+  pull_request:
+    paths:
+      - "web/engine-port/**"
+      - ".github/workflows/darius-codec.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Run codec unit tests
+        working-directory: web/engine-port
+        run: cargo test --all-targets
+      - name: Check WebAssembly compilation
+        working-directory: web/engine-port
+        run: cargo check --target wasm32-unknown-unknown

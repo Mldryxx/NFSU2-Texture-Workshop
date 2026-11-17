@@ -1,0 +1,57 @@
+use gizmo_nfs::texture::{replace_image, Tpk};
+use gizmo_nfs::AssetHash;
+use serde::Serialize;
+use wasm_bindgen::prelude::*;
+const MAX_ARCHIVE: usize = 60 * 1024 * 1024;
+const MAX_PIXELS: u64 = 4_194_304;
+const MAX_SIDE: u32 = 4096;
+#[derive(Serialize)]
+struct TextureInfo { index: usize, hash: String, width: Option<u32>, height: Option<u32>, compressed_size: u32, decoded_size: u32 }
+fn fail(s: impl ToString) -> JsValue { JsValue::from_str(&s.to_string()) }
+fn check(data: &[u8]) -> Result<(), JsValue> {
+    if data.is_empty() { return Err(fail("File BIN kosong.")); }
+    if data.len() > MAX_ARCHIVE { return Err(fail("File BIN melebihi batas 60 MiB.")); }
+    Ok(())
+}
+#[wasm_bindgen]
+pub fn engine_version() -> String { "NFSU2 Texture Workshop engine 0.1.0 (gizmo-nfs)".into() }
+#[wasm_bindgen]
+pub fn list_textures(data: &[u8]) -> Result<JsValue, JsValue> {
+    check(data)?;
+    let entries = Tpk::directory(data).map_err(|e| fail(format!("Struktur TPK/BIN tidak valid: {e}")))?;
+    let mut out = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let dims = Tpk::decode_one(data, entry).ok().map(|t| (t.width, t.height));
+        out.push(TextureInfo { index, hash: format!("0x{:08X}", entry.hash.0), width: dims.map(|d| d.0), height: dims.map(|d| d.1), compressed_size: entry.size, decoded_size: entry.out_size });
+    }
+    serde_wasm_bindgen::to_value(&out).map_err(fail)
+}
+#[wasm_bindgen]
+pub fn decode_texture(data: &[u8], index: usize) -> Result<JsValue, JsValue> {
+    check(data)?;
+    let entries = Tpk::directory(data).map_err(|e| fail(format!("Direktori tekstur tidak valid: {e}")))?;
+    let entry = entries.get(index).ok_or_else(|| fail("Indeks tekstur tidak ditemukan."))?;
+    let t = Tpk::decode_one(data, entry).map_err(|e| fail(format!("Gagal membaca tekstur: {e}")))?;
+    let pixels = t.width as u64 * t.height as u64;
+    if pixels == 0 || pixels > MAX_PIXELS || t.width > MAX_SIDE || t.height > MAX_SIDE { return Err(fail("Dimensi tekstur melewati batas aman.")); }
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(&obj, &"width".into(), &t.width.into()).map_err(fail)?;
+    js_sys::Reflect::set(&obj, &"height".into(), &t.height.into()).map_err(fail)?;
+    let rgba = js_sys::Uint8Array::from(t.rgba.as_slice());
+    js_sys::Reflect::set(&obj, &"rgba".into(), &rgba.into()).map_err(fail)?;
+    Ok(obj.into())
+}
+#[wasm_bindgen]
+pub fn replace_texture(data: &[u8], index: usize, rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    check(data)?;
+    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE { return Err(fail("Dimensi gambar pengganti tidak valid.")); }
+    let expected = (width as usize).checked_mul(height as usize).and_then(|v| v.checked_mul(4)).ok_or_else(|| fail("Ukuran buffer overflow."))?;
+    if rgba.len() != expected { return Err(fail("Buffer gambar harus RGBA 8-bit.")); }
+    let entries = Tpk::directory(data).map_err(|e| fail(format!("Direktori TPK tidak valid: {e}")))?;
+    let entry = entries.get(index).ok_or_else(|| fail("Indeks tekstur tidak ditemukan."))?;
+    let old = Tpk::decode_one(data, entry).map_err(|e| fail(format!("Tekstur tujuan tidak dapat dibaca: {e}")))?;
+    if old.width != width || old.height != height { return Err(fail(format!("Ukuran {width}x{height} tidak cocok; target {}x{}.", old.width, old.height))); }
+    let (edited, _) = replace_image(data, AssetHash(entry.hash.0), rgba, width, height).map_err(|e| fail(format!("Penggantian gagal: {e}")))?;
+    if edited.len() > MAX_ARCHIVE { return Err(fail("Hasil BIN melebihi batas 60 MiB.")); }
+    Ok(edited)
+}

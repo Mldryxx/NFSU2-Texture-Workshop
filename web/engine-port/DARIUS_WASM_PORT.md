@@ -37,7 +37,7 @@ From Nikki/Support.Underground2/Class/TPKBlock.cs:
 ## Porting strategy
 
 1. Implement and test RAWW decode/encode in a small, platform-neutral codec layer.
-2. Implement JDLZ decode/encode and verify byte-level round trips against known fixtures.
+2. Implement JDLZ decode/encode and verify byte-level round trips against known fixtures. Treat the current JDLZ v2 decoder as provisional: public references disagree on v2 flag semantics, so do not enable it for real TPK data until checked against NFSU2/Darius-produced fixtures.
 3. Audit HUFF, COMP, and RFPK separately; do not map BEST directly to a decoder. BEST must select a supported encoder based on actual output size/behavior.
 4. Add a Darius adapter around the NFSU2 TPK classes only after the compression layer is tested.
 5. Preserve all original texture metadata on replacement. Do not use Darius Texture.Initialize/Reload unchanged for replacement: it resets multiple texture attributes to defaults and takes dimensions/compression from the imported DDS.
@@ -47,7 +47,10 @@ From Nikki/Support.Underground2/Class/TPKBlock.cs:
 ## Current status
 
 - Source contract audited: yes.
-- Browser-compatible codec implementation: not yet.
+- Isolated Rust codec crate: started; RAWW and provisional JDLZ v2 decoder are present.
+- Unit tests: authored but not yet executed locally; GitHub Actions now runs `cargo test` and a `wasm32-unknown-unknown` compile check on this branch.
+- JDLZ semantics: provisional; must be validated with a real NFSU2 fixture before use.
+- HUFF/COMP/RFPK and BEST encoder: not implemented.
 - Darius TPK parser integrated: not yet.
 - Android browser test: not yet.
 - Safe BIN rebuild test: not yet.

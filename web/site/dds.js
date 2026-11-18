@@ -40,14 +40,16 @@ export function decodeDDS(buf){
   }
  }else if((pf&0x40)!==0){
   if(bits!==24&&bits!==32)throw Error("DDS RGB harus 24-bit atau 32-bit.");
-  const bytes=bits/8,need=w*h*bytes;if(b.length-data<need)throw Error("Data piksel DDS terpotong.");
+  const bytes=bits/8,rowBytes=w*bytes,rowPitch=Math.max(rowBytes,u32(v,20)||rowBytes),need=rowPitch*h;
+  if(b.length-data<need)throw Error("Data piksel DDS terpotong.");
   const masks=[u32(v,92),u32(v,96),u32(v,100),u32(v,104)];
   if(!masks[0]||!masks[1]||!masks[2])throw Error("Mask RGB DDS tidak valid.");
   const channel=(value,mask)=>{if(!mask)return 255;let shift=0;while(((mask>>>shift)&1)===0)shift++;const m=mask>>>shift;return Math.round(((value&mask)>>>shift)*255/m)};
-  for(let i=0;i<w*h;i++){const p=data+i*bytes,val=bytes===4?u32(v,p):(b[p]|b[p+1]<<8|b[p+2]<<16);put(i%w,Math.floor(i/w),[channel(val,masks[0]),channel(val,masks[1]),channel(val,masks[2]),masks[3]?channel(val,masks[3]):255])}
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const p=data+y*rowPitch+x*bytes,val=bytes===4?u32(v,p):(b[p]|b[p+1]<<8|b[p+2]<<16);put(x,y,[channel(val,masks[0]),channel(val,masks[1]),channel(val,masks[2]),masks[3]?channel(val,masks[3]):255])}
  }else if((pf&0x20000)!==0&&bits===8){
-  if(b.length-data<w*h)throw Error("Data luminance DDS terpotong.");
-  for(let i=0;i<w*h;i++)put(i%w,Math.floor(i/w),[b[data+i],b[data+i],b[data+i],255]);
+  const rowPitch=Math.max(w,u32(v,20)||w);
+  if(b.length-data<rowPitch*h)throw Error("Data luminance DDS terpotong.");
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const lum=b[data+y*rowPitch+x];put(x,y,[lum,lum,lum,255])}
  }else throw Error("Format DDS tidak didukung. Gunakan DXT1/DXT3/DXT5, RGB/RGBA 24/32-bit, atau luminance 8-bit.");
  return {width:w,height:h,rgba:out};
 }

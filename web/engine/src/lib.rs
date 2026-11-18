@@ -1,5 +1,6 @@
 pub mod nfsu2;
 pub mod car_encode;
+pub mod car_api;
 use gizmo_nfs::texture::{replace_image, replace_images, Image, Tpk};
 use gizmo_nfs::AssetHash;
 use serde::Serialize;

@@ -67,7 +67,7 @@ fn alpha_dxt5_table(a0:u8,a1:u8)->[u8;8] {
 }
 fn encode_block(fmt:CarPixelFormat,px:&[[u8;4];16],out:&mut Vec<u8>) {
     match fmt {
-        CarPixelFormat::A8R8G8B8 => unreachable!(),
+        CarPixelFormat::A8R8G8B8 | CarPixelFormat::Indexed8 => unreachable!(),
         CarPixelFormat::Dxt1 => encode_color_block(px,true,out),
         CarPixelFormat::Dxt3 => {
             let mut alpha=0u64;
@@ -123,6 +123,7 @@ fn encode_level(fmt:CarPixelFormat,rgba:&[[u8;4]],w:usize,h:usize)->Vec<u8> {
     out
 }
 pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
+    if tex.format==CarPixelFormat::Indexed8 {return Err(NfsError::Unsupported("palette-indexed vinyl replacement is not implemented yet"));}
     if width!=tex.width as u32 || height!=tex.height as u32 {
         return Err(NfsError::Invalid("replacement dimensions differ from target texture"));
     }
@@ -226,7 +227,7 @@ mod tests {
     fn texture(fmt:CarPixelFormat,w:u16,h:u16,mips:u8)->CarTextureInfo {
         let mut size=0usize;let(mut x,mut y)=(w as usize,h as usize);
         for _ in 0..mips {
-            size+=match fmt {CarPixelFormat::A8R8G8B8=>x*y*4,CarPixelFormat::Dxt1=>((x+3)/4)*((y+3)/4)*8,_=>((x+3)/4)*((y+3)/4)*16};
+            size+=match fmt {CarPixelFormat::A8R8G8B8=>x*y*4,CarPixelFormat::Dxt1=>((x+3)/4)*((y+3)/4)*8,CarPixelFormat::Dxt3|CarPixelFormat::Dxt5=>((x+3)/4)*((y+3)/4)*16,CarPixelFormat::Indexed8=>x*y};
             x=(x/2).max(1);y=(y/2).max(1);
         }
         CarTextureInfo{key:1,name:None,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},pixels:vec![0;size]}

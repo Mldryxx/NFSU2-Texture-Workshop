@@ -555,13 +555,13 @@ mod tests {
     fn decodes_known_dxt1_color_block() {
         let mut pixels=vec![0u8;8];
         pixels.copy_from_slice(&[0x00,0xF8,0x1F,0x00,0b11100100,0,0,0]);
-        let t=CarTextureInfo{key:1,width:4,height:4,format:CarPixelFormat::Dxt1,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:8,decoded_size:8,header_from_end:0,unknown:0},pixels};
+        let t=CarTextureInfo{key:1,name:None,width:4,height:4,format:CarPixelFormat::Dxt1,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:8,decoded_size:8,header_from_end:0,unknown:0},pixels};
         let rgba=decode_car_pixels(&t).unwrap();
         assert_eq!(&rgba[..16],&[255,0,0,255,0,0,255,255,170,0,85,255,85,0,170,255]);
     }
     #[test]
     fn decodes_argb8_channel_order() {
-        let t=CarTextureInfo{key:1,width:1,height:1,format:CarPixelFormat::A8R8G8B8,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},pixels:vec![3,2,1,4]};
+        let t=CarTextureInfo{key:1,name:None,width:1,height:1,format:CarPixelFormat::A8R8G8B8,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},pixels:vec![3,2,1,4]};
         assert_eq!(decode_car_pixels(&t).unwrap(),vec![1,2,3,4]);
     }
 

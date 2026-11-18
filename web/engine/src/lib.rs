@@ -14,19 +14,16 @@ fn check(data: &[u8]) -> Result<(), JsValue> {
     Ok(())
 }
 #[wasm_bindgen]
-pub fn engine_version() -> String { "NFSU2 Texture Workshop engine 0.1.0 (gizmo-nfs)".into() }
+pub fn engine_version() -> String { "NFSU2 Texture Workshop engine 0.1.1 (gizmo-nfs)".into() }
 #[wasm_bindgen]
 pub fn list_textures(data: &[u8]) -> Result<JsValue, JsValue> {
     check(data)?;
     let entries = Tpk::directory(data).map_err(|e| fail(format!("Struktur TPK/BIN tidak valid: {e}")))?;
     let mut out = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
-        let decoded = Tpk::decode_one(data, entry).ok();
-        let (width, height, name) = match decoded {
-            Some(t) => (Some(t.width), Some(t.height), t.name),
-            None => (None, None, String::new()),
-        };
-        out.push(TextureInfo { index, hash: format!("0x{:08X}", entry.hash.0), name, width, height, compressed_size: entry.size, decoded_size: entry.out_size });
+        // Listing reads the embedded debug name only; pixel decoding is deferred until selection.
+        let name = Tpk::name_of(data, entry).unwrap_or_default();
+        out.push(TextureInfo { index, hash: format!("0x{:08X}", entry.hash.0), name, width: None, height: None, compressed_size: entry.size, decoded_size: entry.out_size });
     }
     serde_wasm_bindgen::to_value(&out).map_err(fail)
 }

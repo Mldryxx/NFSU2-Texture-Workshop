@@ -346,7 +346,9 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     for _ in 0..16 {
         let n=mip_size(format,w,h);
         if total.checked_add(n).filter(|v|*v<=p).is_none() { break; }
-        total+=n; mips+=1; w=(w/2).max(1); h=(h/2).max(1);
+        total+=n; mips+=1;
+        if w==1 && h==1 { break; }
+        w=(w/2).max(1); h=(h/2).max(1);
     }
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
     Ok(CarTextureInfo{key,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})

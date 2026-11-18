@@ -14,7 +14,14 @@ export function decodeDDS(buf){
   else pal.push(a.map((n,i)=>(n+z[i])/2),[0,0,0]);
   return {pal,idx:v.getUint32(off+4,true),transparent:c0<=c1&&!forceFour};
  };
- if((pf&4)!==0){
+ if((pf&0x20)!==0&&bits===8){
+  // DDS palette-indexed 8-bit (DDPF_PALETTEINDEXED8): 256 BGRA entries follow the header.
+  const paletteOffset=128,pixelOffset=paletteOffset+1024,rowPitch=w,need=pixelOffset+rowPitch*h;
+  if(b.length<need)throw Error("Palette atau data piksel DDS 8-bit terpotong.");
+  const palette=new Uint8Array(256*4);
+  for(let i=0;i<256;i++){const p=paletteOffset+i*4;palette[i*4]=b[p+2];palette[i*4+1]=b[p+1];palette[i*4+2]=b[p];palette[i*4+3]=b[p+3]}
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const c=b[pixelOffset+y*rowPitch+x],p=(y*w+x)*4,q=c*4;out[p]=palette[q];out[p+1]=palette[q+1];out[p+2]=palette[q+2];out[p+3]=palette[q+3]}
+ }else if((pf&4)!==0){
   if(!["DXT1","DXT3","DXT5"].includes(four))throw Error("FourCC DDS tidak didukung: "+four);
   const blockBytes=four==="DXT1"?8:16,need=Math.ceil(w/4)*Math.ceil(h/4)*blockBytes;
   if(b.length-data<need)throw Error("Data blok DDS terpotong.");
@@ -50,6 +57,6 @@ export function decodeDDS(buf){
   const rowPitch=Math.max(w,u32(v,20)||w);
   if(b.length-data<rowPitch*h)throw Error("Data luminance DDS terpotong.");
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){const lum=b[data+y*rowPitch+x];put(x,y,[lum,lum,lum,255])}
- }else throw Error("Format DDS tidak didukung. Gunakan DXT1/DXT3/DXT5, RGB/RGBA 24/32-bit, atau luminance 8-bit.");
+ }else throw Error("Format DDS tidak didukung. Gunakan DXT1/DXT3/DXT5, RGB/RGBA 24/32-bit, luminance 8-bit, atau palette-indexed 8-bit.");
  return {width:w,height:h,rgba:out};
 }

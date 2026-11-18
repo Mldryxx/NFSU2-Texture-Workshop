@@ -13,7 +13,7 @@ permissions:
   pages: write
   id-token: write
 concurrency:
-  group: github-pages
+  group: nfsu2-vinyl-preview-engine-0-3
   cancel-in-progress: true
 jobs:
   build:

@@ -26,9 +26,11 @@ fn check(data:&[u8])->Result<(),JsValue>{
 fn flatten_slots(data:&[u8])->Result<Vec<(usize,TextureSlot)>,NfsError>{
     let packs=find_car_slot_tables(data)?;
     let mut out=Vec::new();
-    for (pack_index,(_,slots)) in packs.into_iter().enumerate(){
-        for (local,slot) in slots.into_iter().enumerate(){
-            out.push((pack_index*1_000_000+local,slot));
+    let mut global=0usize;
+    for (_,slots) in packs {
+        for slot in slots {
+            out.push((global,slot));
+            global+=1;
         }
     }
     Ok(out)

@@ -87,6 +87,109 @@ pub fn decompress_jdlz(data: &[u8]) -> Result<Vec<u8>, NfsError> {
     Ok(out)
 }
 
+
+struct BitReader<'a> { data: &'a [u8], at: usize, value: u64, count: u32 }
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self { Self { data, at:0, value:0, count:0 } }
+    fn peek(&mut self, n: u32) -> Result<u32,NfsError> {
+        while self.count < n && self.at < self.data.len() {
+            self.value = (self.value << 8) | self.data[self.at] as u64;
+            self.count += 8; self.at += 1;
+        }
+        if self.count < n { return Ok((self.value << (n-self.count)) as u32); }
+        Ok((self.value >> (self.count-n)) as u32)
+    }
+    fn get(&mut self, n: u32) -> Result<u32,NfsError> {
+        let v=self.peek(n)?;
+        if self.count < n { return Err(NfsError::Truncated("HUFF bitstream")); }
+        self.count -= n;
+        self.value &= if self.count == 64 { u64::MAX } else if self.count == 0 { 0 } else { (1u64 << self.count)-1 };
+        Ok(v)
+    }
+    fn number(&mut self) -> Result<usize,NfsError> {
+        let mut width=2u32;
+        while self.get(1)? == 0 { width+=1; if width>30 { return Err(NfsError::Invalid("HUFF unbounded integer")); } }
+        Ok((self.get(width)? as usize) + (1usize << width) - 4)
+    }
+}
+pub fn decompress_huff(data: &[u8], max_output: usize) -> Result<Vec<u8>,NfsError> {
+    if !is_huff(data) { return Err(NfsError::Invalid("not a HUFF block")); }
+    let expected=u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+    let packed=u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+    if expected==0 || expected>max_output || packed==0 || packed>data.len()-16 { return Err(NfsError::Invalid("HUFF sizes")); }
+    let mut bits=BitReader::new(&data[16..16+packed]);
+    let mut kind=bits.get(16)? as u16;
+    if kind & 0x100 != 0 { bits.get(if kind & 0x8000 != 0 {32} else {24})?; }
+    kind &= !0x100;
+    if ![0x30fb,0x32fb,0x34fb,0xb0fb,0xb2fb,0xb4fb].contains(&kind) { return Err(NfsError::Unsupported("HUFF coding kind")); }
+    let inner=bits.get(if kind & 0x8000 != 0 {32} else {24})? as usize;
+    if inner != expected { return Err(NfsError::Invalid("HUFF inner size mismatch")); }
+    let clue=bits.get(8)? as u8;
+    let mut entries:Vec<(u32,u32,u32)>=Vec::new();
+    let (mut base,mut total)=(0u32,0usize);
+    let mut complete=false;
+    for width in 1..=16u32 {
+        base <<= 1;
+        let n=bits.number()? as u32;
+        if total+n as usize>256 || base+n > (1u32<<width) { return Err(NfsError::Invalid("HUFF bad code table")); }
+        entries.push((width,base,n)); base+=n; total+=n as usize;
+        if base == (1u32<<width) { complete=true; break; }
+    }
+    if !complete { return Err(NfsError::Invalid("HUFF incomplete code table")); }
+    let mut used=[false;256]; let mut symbols=Vec::with_capacity(total); let mut cur=255usize;
+    for _ in 0..total {
+        let skip=bits.number()?.checked_add(1).ok_or(NfsError::Invalid("HUFF symbol skip"))?;
+        if skip>256-symbols.len() { return Err(NfsError::Invalid("HUFF bad symbol order")); }
+        let mut left=skip;
+        while left>0 {
+            cur=(cur+1)&255;
+            if !used[cur] { left-=1; }
+        }
+        used[cur]=true; symbols.push(cur as u8);
+    }
+    let mut quick:Vec<Option<(u32,u8)>>=vec![None;256];
+    let mut full=std::collections::HashMap::<(u32,u32),u8>::new();
+    let mut k=0usize;
+    for (width,start,n) in entries {
+        for code in start..start+n {
+            let sym=symbols[k]; k+=1; full.insert((width,code),sym);
+            if width<=8 {
+                let step=1usize << (8-width);
+                for q in (code as usize*step)..((code as usize+1)*step) { quick[q]=Some((width,sym)); }
+            }
+        }
+    }
+    let mut out=Vec::with_capacity(expected);
+    loop {
+        let first=bits.peek(8)? as usize;
+        let sym=if let Some((width,s))=quick[first] { bits.get(width)?; s } else {
+            let mut found=None;
+            for width in 9..=16u32 {
+                let code=bits.peek(width)?;
+                if let Some(s)=full.get(&(width,code)) { bits.get(width)?; found=Some(*s); break; }
+            }
+            found.ok_or(NfsError::Invalid("HUFF unknown code"))?
+        };
+        if sym != clue { out.push(sym); }
+        else {
+            let run=bits.number()?;
+            if run>0 {
+                if out.is_empty() || out.len().checked_add(run).filter(|v|*v<=expected).is_none() { return Err(NfsError::Invalid("HUFF invalid run")); }
+                out.extend(std::iter::repeat(*out.last().unwrap()).take(run));
+            } else if bits.get(1)? != 0 { break; }
+            else { out.push(bits.get(8)? as u8); }
+        }
+        if out.len()>expected { return Err(NfsError::Invalid("HUFF output overrun")); }
+    }
+    if out.len()!=expected { return Err(NfsError::Invalid("HUFF decoded length mismatch")); }
+    if [0x32fb,0xb2fb,0x34fb,0xb4fb].contains(&kind) {
+        let double=[0x34fb,0xb4fb].contains(&kind);
+        let (mut v,mut v2)=(0u8,0u8);
+        for b in out.iter_mut() { v=v.wrapping_add(*b); v2=v2.wrapping_add(v); *b=if double {v2} else {v}; }
+    }
+    Ok(out)
+}
+
 pub fn decompress_block(data: &[u8], max_output: usize) -> Result<Vec<u8>, NfsError> {
     if is_jdlz(data) {
         let raw = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;

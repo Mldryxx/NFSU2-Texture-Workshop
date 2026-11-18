@@ -58,7 +58,7 @@ fn decode_info(data:&[u8],slot:TextureSlot)->Result<CarTextureInfo,NfsError>{dec
 
 #[wasm_bindgen]
 pub fn nfsu2_engine_version()->String {
-    "NFSU2 Texture Workshop engine 0.2.0 (independent Rust JDLZ/HUFF + car TPK)".into()
+    "NFSU2 Texture Workshop engine 0.3.0 (independent Rust JDLZ/HUFF + car TPK)".into()
 }
 #[wasm_bindgen]
 pub fn list_car_textures(data:&[u8])->Result<JsValue,JsValue>{

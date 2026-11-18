@@ -9,7 +9,7 @@ fn decodes_synthetic_canonical_huff_stream() {
         let mut width=2usize;
         while value>((1usize<<(width+1))-5) { bits.push(0); width+=1; }
         bits.push(1);
-        put(bits,(value-(1usize<<width)+4) as u32,width);
+        put(bits,(value+4-(1usize<<width)) as u32,width);
     }
     let mut bits=Vec::new();
     put(&mut bits,0x30fb,16);

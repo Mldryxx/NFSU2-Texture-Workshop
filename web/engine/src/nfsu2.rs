@@ -315,6 +315,43 @@ mod tests {
         b.extend_from_slice(&[1,1,0,0]);
         assert!(decompress_jdlz(&b).is_err());
     }
+
+    #[test]
+    fn parses_nested_chunk_tree() {
+        let mut b=Vec::new();
+        b.extend_from_slice(&0xB3300000u32.to_le_bytes());
+        b.extend_from_slice(&8u32.to_le_bytes());
+        b.extend_from_slice(&0x33310003u32.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        let tree=parse_chunks(&b).unwrap();
+        assert_eq!(tree.len(),1);
+        assert_eq!(tree[0].id,0xB3300000);
+        assert_eq!(tree[0].find(0x33310003).unwrap().size,0);
+    }
+    #[test]
+    fn decodes_raw_slot_and_embedded_texture_header() {
+        let key=0x1234ABCDu32;
+        let mut raw=vec![0u8;128]; // 8-byte DXT1 4x4 block + 120-byte header
+        raw[..8].copy_from_slice(&[1,2,3,4,5,6,7,8]);
+        let p=8;
+        raw[p..p+4].copy_from_slice(&key.to_le_bytes());
+        raw[p+0x20..p+0x22].copy_from_slice(&4u16.to_le_bytes());
+        raw[p+0x22..p+0x24].copy_from_slice(&4u16.to_le_bytes());
+        raw[p+0x26]=0x22;
+        let slot=TextureSlot{key,offset:0,compressed_size:128,decoded_size:128,header_from_end:256,unknown:0};
+        let tex=decode_car_slot(&raw,slot,1024).unwrap();
+        assert_eq!((tex.key,tex.width,tex.height,tex.mip_count),(key,4,4,1));
+        assert_eq!(tex.format,CarPixelFormat::Dxt1);
+        assert_eq!(&tex.pixels[..8],&[1,2,3,4,5,6,7,8]);
+    }
+    #[test]
+    fn rejects_mismatched_embedded_key() {
+        let mut raw=vec![0u8;128];
+        raw[8..12].copy_from_slice(&1u32.to_le_bytes());
+        let slot=TextureSlot{key:2,offset:0,compressed_size:128,decoded_size:128,header_from_end:256,unknown:0};
+        assert!(decode_car_slot(&raw,slot,1024).is_err());
+    }
+
     #[test]
     fn rejects_slot_outside_archive() {
         let s=TextureSlot{key:1,offset:8,compressed_size:9,decoded_size:0,header_from_end:0,unknown:0};

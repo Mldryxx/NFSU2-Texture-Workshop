@@ -322,7 +322,7 @@ fn parse_chunk_range(src:&[u8],start:usize,end:usize,depth:usize)->Result<Vec<Ch
 pub fn parse_chunks(src:&[u8])->Result<Vec<ChunkNode>,NfsError>{ parse_chunk_range(src,0,src.len(),0) }
 
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum CarPixelFormat { A8R8G8B8, Dxt1, Dxt3, Dxt5 }
+pub enum CarPixelFormat { A8R8G8B8, Dxt1, Dxt3, Dxt5, Indexed8 }
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct CarTextureInfo { pub key:u32, pub name:Option<String>, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub pixels:Vec<u8> }
 fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
@@ -330,6 +330,7 @@ fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
         CarPixelFormat::A8R8G8B8=>w*h*4,
         CarPixelFormat::Dxt1=>((w+3)/4)*((h+3)/4)*8,
         CarPixelFormat::Dxt3|CarPixelFormat::Dxt5=>((w+3)/4)*((h+3)/4)*16,
+        CarPixelFormat::Indexed8=>w*h,
     }
 }
 fn car_texture_name(raw:&[u8],key:u32)->Option<String> {
@@ -346,6 +347,25 @@ fn car_texture_name(raw:&[u8],key:u32)->Option<String> {
 pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
     let raw=decompress_block(slot.block(archive)?,max_output)?;
     if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
+    // VINYLS.BIN HUFF slots use a distinct 144-byte trailer.
+    if is_huff(slot.block(archive)?) && raw.len()>=144 {
+        let rec=&raw[raw.len()-144..];
+        let trailer_key=u32::from_le_bytes(rec[0x18..0x1c].try_into().unwrap());
+        let width=u16::from_le_bytes(rec[0x38..0x3a].try_into().unwrap());
+        let height=u16::from_le_bytes(rec[0x3a..0x3c].try_into().unwrap());
+        let fourcc=u32::from_le_bytes(rec[0x84..0x88].try_into().unwrap());
+        if trailer_key==slot.key && width>=8 && height>=8 && width<=4096 && height<=4096 &&
+            (width as usize)*(height as usize)<=4_194_304 {
+            let (format,pixel_len)=match fourcc {
+                0x3154_5844 => (CarPixelFormat::Dxt1,((width as usize+3)/4)*((height as usize+3)/4)*8),
+                0x3354_5844 => (CarPixelFormat::Dxt3,((width as usize+3)/4)*((height as usize+3)/4)*16),
+                _ => (CarPixelFormat::Indexed8,width as usize*height as usize),
+            };
+            if pixel_len+144>raw.len(){return Err(NfsError::Invalid("vinyl pixel data overlaps trailer"));}
+            let name=car_texture_name(&raw,slot.key);
+            return Ok(CarTextureInfo{key:slot.key,name,width,height,format,mip_count:1,slot,pixels:raw[..pixel_len].to_vec()});
+        }
+    }
     let p=slot.header_offset(raw.len())?;
     let key=u32::from_le_bytes(raw[p..p+4].try_into().unwrap());
     if key!=slot.key { return Err(NfsError::Invalid("embedded texture key mismatch")); }
@@ -395,6 +415,13 @@ fn dxt5_alpha_table(a0:u8,a1:u8)->[u8;8] {
 pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
     let w=tex.width as usize; let h=tex.height as usize;
     let mut out=vec![0u8;w*h*4];
+    if tex.format==CarPixelFormat::Indexed8 {
+        if tex.pixels.len()<w*h{return Err(NfsError::Truncated("indexed vinyl pixels"));}
+        let mut hist=[0usize;256];for &v in tex.pixels.iter().take(w*h){hist[v as usize]+=1;}
+        let bg=(0..256).max_by_key(|&i|hist[i]).unwrap_or(0) as u8;
+        for i in 0..w*h {let ix=tex.pixels[i];let shade=70u8.saturating_add((ix&15).saturating_mul(12));let q=i*4;out[q]=shade;out[q+1]=shade;out[q+2]=shade;out[q+3]=if ix==bg{0}else{255};}
+        return Ok(out);
+    }
     if tex.format==CarPixelFormat::A8R8G8B8 {
         if tex.pixels.len()<w*h*4 {return Err(NfsError::Truncated("ARGB8 pixels"));}
         for i in 0..w*h { let q=i*4; out[q]=tex.pixels[q+2];out[q+1]=tex.pixels[q+1];out[q+2]=tex.pixels[q];out[q+3]=tex.pixels[q+3];}

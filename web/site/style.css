@@ -8,3 +8,28 @@
 @media(max-width:740px){main{margin:14px auto;padding:0 11px}.topbar{height:62px}.brand{gap:9px}.mark{padding:7px 9px}.brand strong{font-size:13px}.brand small{font-size:10px}.welcome{padding:18px;border-radius:13px}.welcome h1{font-size:29px}.welcome .muted{font-size:13px;margin-bottom:2px}.stats{gap:8px;margin:10px 0}.stat{padding:10px 12px}.browser,.preview{padding:13px;min-height:0}.heading{align-items:flex-start;flex-wrap:wrap}.heading input{width:100%;min-width:100%;order:2}.texture-list{max-height:310px}.texture-item{padding:10px;font-size:12px}.stage{height:250px}.actions>*{flex:1}.pair-import{padding:10px}.message{line-height:1.45}}
 
 .pair-targets{display:grid;grid-template-columns:1fr auto;gap:7px 10px;align-items:center}.pair-targets span{font-size:12px;color:var(--muted)}.pair-targets .secondary{min-height:32px}@media(max-width:420px){.pair-targets{grid-template-columns:1fr}.pair-targets .secondary{width:100%}}
+
+/* Preview-first testing layout */
+.topbar{z-index:20}
+.workspace{grid-template-columns:minmax(0,1.5fr) minmax(240px,.85fr)}
+.workspace>.preview{grid-column:1;grid-row:1}
+.workspace>.browser{grid-column:2;grid-row:1}
+.preview{position:sticky;top:82px;align-self:start;max-height:calc(100vh - 98px);overflow-y:auto;overscroll-behavior:contain}
+.stage{min-height:240px}
+.stage canvas{object-fit:contain;image-rendering:auto}
+.texture-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.texture-item span{min-width:0;overflow-wrap:anywhere}
+.texture-item small{text-align:right;white-space:nowrap}
+@media(max-width:740px){
+  .workspace{display:flex;flex-direction:column;gap:10px}
+  .workspace>.preview{order:0}
+  .workspace>.browser{order:1}
+  .preview{top:70px;max-height:43svh;max-height:43vh;padding:11px}
+  .preview .heading{margin-bottom:8px}
+  .preview .heading h2{font-size:15px}
+  .stage{height:185px;min-height:150px}
+  .texture-list{max-height:52vh;max-height:52svh}
+  .texture-item{grid-template-columns:minmax(0,1fr);gap:2px}
+  .texture-item small{text-align:left;white-space:normal}
+  .texture-item span{font-size:12px;font-weight:650}
+}

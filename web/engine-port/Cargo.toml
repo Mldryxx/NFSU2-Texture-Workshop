@@ -1,0 +1,9 @@
+[package]
+name = "nfsu2-darius-codec"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Platform-neutral RAWW/JDLZ codec adapter for the NFSU2 Texture Workshop Darius port"
+
+[lib]
+path = "src/lib.rs"

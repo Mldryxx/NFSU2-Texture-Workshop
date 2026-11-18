@@ -229,7 +229,7 @@ mod tests {
             size+=match fmt {CarPixelFormat::A8R8G8B8=>x*y*4,CarPixelFormat::Dxt1=>((x+3)/4)*((y+3)/4)*8,_=>((x+3)/4)*((y+3)/4)*16};
             x=(x/2).max(1);y=(y/2).max(1);
         }
-        CarTextureInfo{key:1,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},pixels:vec![0;size]}
+        CarTextureInfo{key:1,name:None,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},pixels:vec![0;size]}
     }
     #[test]
     fn encodes_all_car_formats_and_mips_to_exact_slot_size() {

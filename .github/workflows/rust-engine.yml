@@ -1,0 +1,26 @@
+name: Rust engine checks
+
+on:
+  push:
+    branches: [binarius-engine-port]
+    paths:
+      - "web/engine/**"
+      - ".github/workflows/rust-engine.yml"
+  pull_request:
+    paths:
+      - "web/engine/**"
+      - ".github/workflows/rust-engine.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path web/engine/Cargo.toml
+      - name: Check WebAssembly build
+        run: cargo check --manifest-path web/engine/Cargo.toml --target wasm32-unknown-unknown

@@ -5,10 +5,12 @@ on:
     branches: [binarius-engine-port]
     paths:
       - "web/engine/**"
+      - "web/site/**"
       - ".github/workflows/rust-engine.yml"
   pull_request:
     paths:
       - "web/engine/**"
+      - "web/site/**"
       - ".github/workflows/rust-engine.yml"
   workflow_dispatch:
 
@@ -20,7 +22,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Run Rust unit tests
         run: cargo test --manifest-path web/engine/Cargo.toml
-      - name: Check WebAssembly build
+      - name: Check WebAssembly target
         run: cargo check --manifest-path web/engine/Cargo.toml --target wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Build WebAssembly package
+        working-directory: web/engine
+        run: wasm-pack build --target web --release --out-dir ../site/pkg
+      - name: Test browser application
+        run: npm test --prefix web/site
+      - name: Verify independent exports
+        run: |
+          grep -q "nfsu2_engine_version" web/site/pkg/nfsu2_web_engine.js
+          grep -q "list_car_textures" web/site/pkg/nfsu2_web_engine.js
+          grep -q "decode_car_texture" web/site/pkg/nfsu2_web_engine.js
+          grep -q "replace_car_texture_pair_with_status" web/site/pkg/nfsu2_web_engine.js

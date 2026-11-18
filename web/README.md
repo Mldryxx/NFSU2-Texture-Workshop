@@ -4,7 +4,7 @@ Offline-first browser editor for Need for Speed: Underground 2 BIN/TPK archives.
 The WebAssembly engine reuses the pinned upstream gizmo-nfs crate from PryHUB at commit `861753d58ef065bc0944ca3241dad8a0dea7bfde`.
 
 ## Current capabilities
-- Open a BIN/TPK archive locally in the browser and list texture entries.
+- Open a BIN/TPK archive locally in the browser and list texture entries by their embedded names and hashes, making Base/Mask entries easier to locate.
 - Decode and preview individual textures without decoding the whole archive.
 - Import DDS files using DXT1, DXT3, DXT5, RGB 24/32-bit, or luminance 8-bit pixel data.
 - Replace a selected texture while preserving its original dimensions and the embedded texture metadata.

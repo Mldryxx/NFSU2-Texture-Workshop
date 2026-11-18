@@ -35,9 +35,20 @@ jobs:
       - name: Test native Rust engine primitives
         working-directory: web/engine
         run: cargo test --lib
+      - name: Check WebAssembly target
+        run: cargo check --manifest-path web/engine/Cargo.toml --target wasm32-unknown-unknown
       - name: Build WebAssembly engine
         working-directory: web/engine
         run: wasm-pack build --target web --release --out-dir ../site/pkg
+      - name: Verify WebAssembly exports
+        run: |
+          test -s web/site/pkg/nfsu2_web_engine.js
+          test -s web/site/pkg/nfsu2_web_engine_bg.wasm
+          grep -q 'nfsu2_engine_version' web/site/pkg/nfsu2_web_engine.js
+          grep -q 'list_car_textures' web/site/pkg/nfsu2_web_engine.js
+          grep -q 'decode_car_texture' web/site/pkg/nfsu2_web_engine.js
+          grep -q 'replace_car_texture_with_status' web/site/pkg/nfsu2_web_engine.js
+          grep -q 'replace_car_texture_pair_with_status' web/site/pkg/nfsu2_web_engine.js
       - name: Upload downloadable web app
         uses: actions/upload-artifact@v4
         with:

@@ -6,7 +6,7 @@ This branch isolates the engine migration from the existing experimental gizmo-n
 
 Source: nlgxzef/Darius, Nikki/Utils/Interop.cs and Nikki/Reflection/Enum/LZCompressionType.cs.
 
-The native dependency is `LZCompressLib.dll`, imported through Cdecl:
+The repository tree contains a prebuilt `Nikki/LZCompressLib.dll` binary (25,088 bytes), but no corresponding native source implementation was found in the audited tree. It is imported through Cdecl:
 - `BlockDecompress(input, input_length, output)`
 - `BlockCompress(input, input_length, output, compression_type)`
 
@@ -47,6 +47,7 @@ From Nikki/Support.Underground2/Class/TPKBlock.cs:
 ## Current status
 
 - Source contract audited: yes.
+- Native compression dependency: Darius repository includes a prebuilt `LZCompressLib.dll`, but this is a native binary, not a portable WebAssembly implementation. It cannot simply be called from a browser/WASM module; the compression algorithms must be ported/reimplemented or replaced with a WASM-compatible library, and verified against Darius output.
 - Isolated Rust codec crate: started; RAWW and provisional JDLZ v2 decoder are present.
 - GitHub Actions validation: passed on commit `789b71b739fa3adfa7851b9aa43b0cc5a623e40d`. All four unit tests passed, and the `wasm32-unknown-unknown` compile check passed. This validates the current small codec crate only; it does not validate real game archives.
 - JDLZ semantics: provisional; the near-reference test now passes, but the decoder must still be validated against a real NFSU2/Darius-produced fixture.

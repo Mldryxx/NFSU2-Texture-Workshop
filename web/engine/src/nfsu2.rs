@@ -43,8 +43,8 @@ impl TextureSlot {
         archive.get(start..end).ok_or(NfsError::OutOfRange)
     }
     pub fn header_offset(&self, decoded_len: usize) -> Result<usize, NfsError> {
-        decoded_len.checked_sub(self.header_from_end as usize)
-            .and_then(|v| v.checked_add(0x88))
+        decoded_len.checked_add(0x88)
+            .and_then(|v| v.checked_sub(self.header_from_end as usize))
             .filter(|v| *v <= decoded_len && decoded_len.saturating_sub(*v) >= 0x28)
             .ok_or(NfsError::Invalid("embedded texture header is out of range"))
     }
@@ -175,7 +175,7 @@ pub fn decompress_huff(data: &[u8], max_output: usize) -> Result<Vec<u8>,NfsErro
             let run=bits.number()?;
             if run>0 {
                 if out.is_empty() || out.len().checked_add(run).filter(|v|*v<=expected).is_none() { return Err(NfsError::Invalid("HUFF invalid run")); }
-                out.extend(std::iter::repeat(*out.last().unwrap()).take(run));
+                let previous=*out.last().unwrap();\n                out.extend(std::iter::repeat(previous).take(run));
             } else if bits.get(1)? != 0 { break; }
             else { out.push(bits.get(8)? as u8); }
         }
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(tree[0].find(0x33310003).unwrap().size,0);
     }
     #[test]
-    fn decodes_raw_slot_and_embedded_texture_header() {
+    fn embedded_header_offset_uses_signed_equivalent_formula() {\n        let slot=TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:256,unknown:0};\n        assert_eq!(slot.header_offset(128).unwrap(),8);\n    }\n    #[test]\n    fn decodes_raw_slot_and_embedded_texture_header() {
         let key=0x1234ABCDu32;
         let mut raw=vec![0u8;128]; // 8-byte DXT1 4x4 block + 120-byte header
         raw[..8].copy_from_slice(&[1,2,3,4,5,6,7,8]);

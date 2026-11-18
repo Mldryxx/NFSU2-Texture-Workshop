@@ -37,6 +37,12 @@ jobs:
         run: wasm-pack build --target web --release --out-dir ../site/pkg
       - name: Test browser application
         run: npm test --prefix web/site
+      - name: Upload WebAssembly package for integration testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfsu2-wasm-package
+          path: web/site/pkg/
+          retention-days: 1
       - name: Verify independent exports
         run: |
           grep -q "nfsu2_engine_version" web/site/pkg/nfsu2_web_engine.js

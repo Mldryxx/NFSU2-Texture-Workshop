@@ -191,6 +191,91 @@ pub fn decompress_huff(data: &[u8], max_output: usize) -> Result<Vec<u8>,NfsErro
     Ok(out)
 }
 
+
+#[derive(Clone,Copy)]
+enum JdlzOp { Literal(u8), Reference{len:usize,dist:usize,long:bool} }
+pub fn compress_jdlz(raw:&[u8])->Result<Vec<u8>,NfsError> {
+    if raw.is_empty() { return Err(NfsError::Invalid("cannot JDLZ-compress an empty block")); }
+    use std::collections::{HashMap,VecDeque};
+    let mut index:HashMap<u32,VecDeque<usize>>=HashMap::new();
+    let mut ops:Vec<JdlzOp>=Vec::new();
+    let mut i=0usize;
+    while i<raw.len() {
+        let mut best:Option<(usize,usize,bool)>=None;
+        if i+3<=raw.len() {
+            let key=((raw[i] as u32)<<16)|((raw[i+1] as u32)<<8)|raw[i+2] as u32;
+            if let Some(candidates)=index.get(&key) {
+                for &pos in candidates.iter().rev() {
+                    let dist=i-pos;
+                    if dist==0 || dist>2064 {continue;}
+                    let limit=(raw.len()-i).min(dist).min(if dist<=16 {4098} else {34});
+                    let mut n=0usize;
+                    while n<limit && raw[pos+n]==raw[i+n] {n+=1;}
+                    if n>=3 && best.map_or(true,|b|n>b.0 || (n==b.0 && dist<b.1)) {
+                        best=Some((n,dist,dist<=16));
+                    }
+                }
+            }
+        }
+        if let Some((len,dist,long))=best {
+            ops.push(JdlzOp::Reference{len,dist,long});
+            for p in i..i+len {
+                if p+3<=raw.len() {
+                    let k=((raw[p] as u32)<<16)|((raw[p+1] as u32)<<8)|raw[p+2] as u32;
+                    let q=index.entry(k).or_default(); q.push_back(p);
+                    while q.front().is_some_and(|v|p-*v>2064){q.pop_front();}
+                }
+            }
+            i+=len;
+        } else {
+            ops.push(JdlzOp::Literal(raw[i]));
+            if i+3<=raw.len() {
+                let k=((raw[i] as u32)<<16)|((raw[i+1] as u32)<<8)|raw[i+2] as u32;
+                let q=index.entry(k).or_default();q.push_back(i);
+                while q.front().is_some_and(|v|i-*v>2064){q.pop_front();}
+            }
+            i+=1;
+        }
+    }
+    let mut payload=Vec::<u8>::new();
+    let (mut f1_pos,mut f2_pos)=(0usize,0usize);
+    let (mut f1_mask,mut f2_mask)=(1u16,1u16);
+    let (mut need_f1,mut need_f2)=(true,true);
+    for op in ops {
+        if need_f1 {f1_pos=payload.len();payload.push(0);need_f1=false;f1_mask=1;}
+        if need_f2 {f2_pos=payload.len();payload.push(0);need_f2=false;f2_mask=1;}
+        match op {
+            JdlzOp::Literal(b)=>payload.push(b),
+            JdlzOp::Reference{len,dist,long}=>{
+                payload[f1_pos]|=f1_mask as u8;
+                let encoded_len=len-3;
+                if long {
+                    payload[f2_pos]|=f2_mask as u8;
+                    let encoded_dist=dist-1;
+                    payload.push((((encoded_len>>4)&0xf0)|(encoded_dist&0x0f)) as u8);
+                    payload.push((encoded_len&0xff) as u8);
+                } else {
+                    let encoded_dist=dist-17;
+                    payload.push((((encoded_dist>>3)&0xe0)|(encoded_len&0x1f)) as u8);
+                    payload.push((encoded_dist&0xff) as u8);
+                }
+                f2_mask<<=1;
+                if f2_mask==0x100 {need_f2=true;f2_mask=1;}
+            }
+        }
+        f1_mask<<=1;
+        if f1_mask==0x100 {need_f1=true;f1_mask=1;}
+    }
+    let total=16usize.checked_add(payload.len()).ok_or(NfsError::OutOfRange)?;
+    let mut out=Vec::with_capacity(total);
+    out.extend_from_slice(b"JDLZ");
+    out.extend_from_slice(&0x1002u32.to_le_bytes());
+    out.extend_from_slice(&(raw.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(total as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    Ok(out)
+}
+
 pub fn decompress_block(data: &[u8], max_output: usize) -> Result<Vec<u8>, NfsError> {
     if is_jdlz(data) {
         let raw = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
@@ -380,6 +465,16 @@ mod tests {
         b.extend_from_slice(&20u32.to_le_bytes());
         b.extend_from_slice(&[1,1,0,0]);
         assert!(decompress_jdlz(&b).is_err());
+    }
+
+
+    #[test]
+    fn jdlz_encoder_roundtrips_literals_and_references() {
+        for raw in [b"hello world".to_vec(),vec![b'A';256],(0..=255).cycle().take(1024).collect()] {
+            let packed=compress_jdlz(&raw).unwrap();
+            assert!(is_jdlz(&packed));
+            assert_eq!(decompress_jdlz(&packed).unwrap(),raw);
+        }
     }
 
     #[test]

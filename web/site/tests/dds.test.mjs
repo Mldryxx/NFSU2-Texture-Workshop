@@ -69,3 +69,17 @@ test("respects padded luminance row pitch",()=>{
  assert.deepEqual([...d.rgba.slice(0,4)],[20,20,20,255]);
  assert.deepEqual([...d.rgba.slice(4,8)],[80,80,80,255]);
 });
+
+test("decodes interpolated DXT3 alpha nibble",()=>{
+ const p=dxtBlock(0x88);
+ const d=decodeDDS(dds({fourCC:"DXT3",payload:p}));
+ assert.equal(d.rgba[3],136);
+});
+test("decodes interpolated DXT5 alpha selector",()=>{
+ const p=Buffer.alloc(16);p[0]=0;p[1]=255;
+ let selectors=0n;for(let i=0;i<16;i++)selectors|=2n<<BigInt(3*i);
+ for(let i=0;i<6;i++)p[2+i]=Number((selectors>>BigInt(8*i))&255n);
+ p.writeUInt16LE(0xf800,8);
+ const d=decodeDDS(dds({fourCC:"DXT5",payload:p}));
+ assert.equal(d.rgba[3],51);
+});

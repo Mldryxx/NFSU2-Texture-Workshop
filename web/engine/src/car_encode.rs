@@ -154,39 +154,72 @@ pub fn replace_car_texture_slots(
     textures:&[CarTextureInfo],
     replacements:&[(usize,&[u8],u32,u32)],
 )->Result<Vec<u8>,NfsError> {
-    use crate::nfsu2::{compress_jdlz,decompress_block};
+    use crate::nfsu2::{compress_jdlz,decompress_block,find_car_slot_tables,parse_chunks};
     use std::collections::HashSet;
     if replacements.is_empty() {return Err(NfsError::Invalid("no texture replacements supplied"));}
+    if archive.len()<8 {return Err(NfsError::Truncated("BIN root chunk"));}
+    let packs=find_car_slot_tables(archive)?;
+    if packs.len()!=1 {return Err(NfsError::Unsupported("replacement currently requires exactly one compressed TPK pack"));}
+    let (root_ref,slots)=&packs[0];
+    let tree=parse_chunks(archive)?;
+    let root=tree.iter().find(|n|n.offset==root_ref.offset&&n.id==0xB3300000).ok_or(NfsError::Invalid("TPK root node not found"))?;
+    let info=root.find(0xB3310000).ok_or(NfsError::Invalid("TPK info chunk missing"))?;
+    let table=info.find(0x33310003).ok_or(NfsError::Invalid("TPK slot table missing"))?;
+    let data=root.find(0xB3320000).ok_or(NfsError::Invalid("TPK data chunk missing"))?;
+    let pixels=data.find(0x33320002).ok_or(NfsError::Invalid("TPK pixel data chunk missing"))?;
+    let root_end=root.offset.checked_add(8).and_then(|v|v.checked_add(root.size)).ok_or(NfsError::OutOfRange)?;
+    let data_end=data.offset.checked_add(8).and_then(|v|v.checked_add(data.size)).ok_or(NfsError::OutOfRange)?;
+    let pixels_end=pixels.offset.checked_add(8).and_then(|v|v.checked_add(pixels.size)).ok_or(NfsError::OutOfRange)?;
+    if root.offset!=0 || root_end!=archive.len() || data_end!=archive.len() || pixels_end!=archive.len() {
+        return Err(NfsError::Unsupported("TPK pixel block is not the final BIN chunk; safe tail relocation is unavailable"));
+    }
+    if table.size!=slots.len()*TextureSlot::SIZE {return Err(NfsError::Invalid("slot table size mismatch"));}
     let mut seen=HashSet::new();
-    let mut patches:Vec<(usize,usize,Vec<u8>)>=Vec::with_capacity(replacements.len());
+    let mut patches:Vec<(usize,Vec<u8>,usize)>=Vec::with_capacity(replacements.len());
     for (index,rgba,w,h) in replacements {
         if !seen.insert(*index) {return Err(NfsError::Invalid("duplicate texture index in replacement set"));}
         let tex=textures.get(*index).ok_or(NfsError::Invalid("texture index not found"))?;
+        let slot_index=slots.iter().position(|s|s==&tex.slot).ok_or(NfsError::Invalid("texture slot not present in BIN table"))?;
         let mut raw=decompress_block(tex.slot.block(archive)?,64*1024*1024)?;
         if raw.len()!=tex.slot.decoded_size as usize {return Err(NfsError::Invalid("decoded slot size changed"));}
         let encoded=encode_car_pixels(tex,rgba,*w,*h)?;
         if encoded.len()!=tex.pixels.len() || encoded.len()>raw.len() {return Err(NfsError::Invalid("replacement pixel extent is invalid"));}
         raw[..encoded.len()].copy_from_slice(&encoded);
         let packed=compress_jdlz(&raw)?;
-        if packed.len()>tex.slot.compressed_size as usize {
-            return Err(NfsError::Invalid("replacement exceeds reserved compressed slot; archive relocation is required"));
-        }
-        let start=tex.slot.offset as usize;
-        let end=start.checked_add(tex.slot.compressed_size as usize).ok_or(NfsError::OutOfRange)?;
-        if end>archive.len() {return Err(NfsError::OutOfRange);}
-        let mut region=vec![0u8;tex.slot.compressed_size as usize];
-        region[..packed.len()].copy_from_slice(&packed);
-        patches.push((start,end,region));
-    }
-    patches.sort_by_key(|p|p.0);
-    for pair in patches.windows(2) {
-        if pair[0].1>pair[1].0 {return Err(NfsError::Invalid("replacement slot regions overlap"));}
+        let mut check=decompress_block(&packed,64*1024*1024)?;
+        if check!=raw {return Err(NfsError::Invalid("JDLZ round-trip validation failed"));}
+        check.clear();
+        patches.push((slot_index,packed,tex.slot.offset as usize));
     }
     let mut output=archive.to_vec();
-    for (start,end,region) in patches {output[start..end].copy_from_slice(&region);}
+    let mut added=0usize;
+    for (slot_index,packed,_old_offset) in patches {
+        let padding=(128-(output.len()%128))%128;
+        output.resize(output.len()+padding,0);
+        let new_offset=output.len();
+        let new_end=new_offset.checked_add(packed.len()).ok_or(NfsError::OutOfRange)?;
+        if new_end>60*1024*1024 {return Err(NfsError::Invalid("edited BIN exceeds 60 MiB limit"));}
+        output.extend_from_slice(&packed);
+        let record=table.payload_offset+slot_index*TextureSlot::SIZE;
+        let off=u32::try_from(new_offset).map_err(|_|NfsError::OutOfRange)?;
+        let enc=u32::try_from(packed.len()).map_err(|_|NfsError::OutOfRange)?;
+        output[record+4..record+8].copy_from_slice(&off.to_le_bytes());
+        output[record+8..record+12].copy_from_slice(&enc.to_le_bytes());
+        added=output.len()-archive.len();
+    }
+    let new_pixel_size=pixels.size.checked_add(added).ok_or(NfsError::OutOfRange)?;
+    let new_data_size=data.size.checked_add(added).ok_or(NfsError::OutOfRange)?;
+    let new_root_size=root.size.checked_add(added).ok_or(NfsError::OutOfRange)?;
+    output[pixels.offset+4..pixels.offset+8].copy_from_slice(&(new_pixel_size as u32).to_le_bytes());
+    output[data.offset+4..data.offset+8].copy_from_slice(&(new_data_size as u32).to_le_bytes());
+    output[root.offset+4..root.offset+8].copy_from_slice(&(new_root_size as u32).to_le_bytes());
+    let reparsed=parse_chunks(&output)?;
+    if reparsed.len()!=1 || reparsed[0].size!=new_root_size {return Err(NfsError::Invalid("rebuilt BIN chunk validation failed"));}
+    let verified=find_car_slot_tables(&output)?;
+    if verified.len()!=1 {return Err(NfsError::Invalid("rebuilt BIN slot table validation failed"));}
+    for (slot_index,_,_) in &[] as &[(usize,Vec<u8>,usize)] {let _=slot_index;}
     Ok(output)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

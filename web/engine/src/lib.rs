@@ -69,7 +69,7 @@ fn replace_texture_pair_inner(data: &[u8], base_index: usize, base_rgba: &[u8], 
     let base = entries.get(base_index).ok_or_else(|| fail("Indeks Base tidak ditemukan."))?;
     let mask = entries.get(mask_index).ok_or_else(|| fail("Indeks Mask tidak ditemukan."))?;
     for (label, rgba, width, height, entry) in [("Base", base_rgba, base_width, base_height, base), ("Mask", mask_rgba, mask_width, mask_height, mask)] {
-        if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE { return Err(fail(format!("Dimensi {label} tidak valid."))); }
+        if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE || (width as u64) * (height as u64) > MAX_PIXELS { return Err(fail(format!("Dimensi {label} melewati batas aman."))); }
         let expected = (width as usize).checked_mul(height as usize).and_then(|v| v.checked_mul(4)).ok_or_else(|| fail("Ukuran buffer overflow."))?;
         if rgba.len() != expected { return Err(fail(format!("Buffer {label} harus RGBA 8-bit."))); }
         let old = Tpk::decode_one(data, entry).map_err(|e| fail(format!("Tekstur {label} tidak dapat dibaca: {e}")))?;

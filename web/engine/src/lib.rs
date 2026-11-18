@@ -35,10 +35,10 @@ pub fn decode_texture(data: &[u8], index: usize) -> Result<JsValue, JsValue> {
     let pixels = t.width as u64 * t.height as u64;
     if pixels == 0 || pixels > MAX_PIXELS || t.width > MAX_SIDE || t.height > MAX_SIDE { return Err(fail("Dimensi tekstur melewati batas aman.")); }
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"width".into(), &t.width.into()).map_err(fail)?;
-    js_sys::Reflect::set(&obj, &"height".into(), &t.height.into()).map_err(fail)?;
+    js_sys::Reflect::set(&obj, &"width".into(), &t.width.into()).map_err(|_| fail("Gagal membentuk data preview tekstur."))?;
+    js_sys::Reflect::set(&obj, &"height".into(), &t.height.into()).map_err(|_| fail("Gagal membentuk data preview tekstur."))?;
     let rgba = js_sys::Uint8Array::from(t.rgba.as_slice());
-    js_sys::Reflect::set(&obj, &"rgba".into(), &rgba.into()).map_err(fail)?;
+    js_sys::Reflect::set(&obj, &"rgba".into(), &rgba.into()).map_err(|_| fail("Gagal membentuk data preview tekstur."))?;
     Ok(obj.into())
 }
 #[wasm_bindgen]

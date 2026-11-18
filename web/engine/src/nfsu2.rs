@@ -416,6 +416,24 @@ pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
     Ok(out)
 }
 
+pub fn find_car_slot_tables(src:&[u8])->Result<Vec<(ChunkNode,Vec<TextureSlot>)>,NfsError>{
+    fn walk(src:&[u8],nodes:&[ChunkNode],out:&mut Vec<(ChunkNode,Vec<TextureSlot>)>)->Result<(),NfsError>{
+        for n in nodes {
+            if n.id==0xB3300000 {
+                if let Some(info)=n.find(0xB3310000) {
+                    if let Some(table)=info.find(0x33310003) {
+                        let slots=TextureSlot::parse_table(table.payload(src)?)?;
+                        out.push((n.clone(),slots));
+                    }
+                }
+            }
+            walk(src,&n.children,out)?;
+        }
+        Ok(())
+    }
+    let nodes=parse_chunks(src)?;let mut out=Vec::new();walk(src,&nodes,&mut out)?;Ok(out)
+}
+
 pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,Vec<CarTextureInfo>)>,NfsError>{
     fn walk(src:&[u8],nodes:&[ChunkNode],max_block:usize,out:&mut Vec<(ChunkNode,Vec<CarTextureInfo>)>)->Result<(),NfsError>{
         for n in nodes {

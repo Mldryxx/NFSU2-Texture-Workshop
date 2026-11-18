@@ -14,7 +14,7 @@ The WebAssembly engine reuses the pinned upstream gizmo-nfs crate from PryHUB at
 ## Important limitations
 - DDS mipmaps beyond the top image are not imported; the existing texture mip chain and metadata are retained.
 - Base and Mask are currently replaced as individual texture entries. Automatic Base/Mask pairing and batch replacement are not implemented.
-- The DDS decoder and replacement path compile in CI, but still require validation against real `VINYLS.BIN` files and in-game testing before being considered production-ready.
+- The DDS decoder has 13 automated regression tests covering supported formats, alpha decoding, row pitch, invalid headers, and truncated payloads. The replacement path builds in CI, but both still require validation against real `VINYLS.BIN` files and in-game testing before being considered production-ready.
 - Some unusual third-party TPK layouts may be refused by the upstream relocation routine rather than rewritten unsafely.
 
 ## Safety limits
@@ -25,3 +25,6 @@ The WebAssembly engine reuses the pinned upstream gizmo-nfs crate from PryHUB at
 - The original BIN is never overwritten.
 
 The app works offline after its web assets have been loaded and cached by the service worker.
+
+## Developer checks
+Run the DDS decoder regression suite with `cd web/site && npm test`.

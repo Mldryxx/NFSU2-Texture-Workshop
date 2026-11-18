@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - binarius-engine-port
+      - main
     paths:
       - "web/**"
       - ".github/workflows/web-engine.yml"

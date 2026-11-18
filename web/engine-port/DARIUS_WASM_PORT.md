@@ -48,8 +48,8 @@ From Nikki/Support.Underground2/Class/TPKBlock.cs:
 
 - Source contract audited: yes.
 - Isolated Rust codec crate: started; RAWW and provisional JDLZ v2 decoder are present.
-- Unit tests: authored but not yet executed locally; GitHub Actions now runs `cargo test` and a `wasm32-unknown-unknown` compile check on this branch.
-- JDLZ semantics: provisional; must be validated with a real NFSU2 fixture before use.
+- GitHub Actions validation: passed on commit `789b71b739fa3adfa7851b9aa43b0cc5a623e40d`. All four unit tests passed, and the `wasm32-unknown-unknown` compile check passed. This validates the current small codec crate only; it does not validate real game archives.
+- JDLZ semantics: provisional; the near-reference test now passes, but the decoder must still be validated against a real NFSU2/Darius-produced fixture.
 - HUFF/COMP/RFPK and BEST encoder: not implemented.
 - Darius TPK parser integrated: not yet.
 - Android browser test: not yet.

@@ -45,6 +45,14 @@ test("decodes RGBA32 alpha channel",()=>{
  const d=decodeDDS(dds({flags:0x41,bits:32,masks:[0x00ff0000,0x0000ff00,0x000000ff,0xff000000],payload:Buffer.from([0,0,255,128,...Array(60).fill(0)])}));
  assert.deepEqual([...d.rgba.slice(0,4)],[255,0,0,128]);
 });
+test("decodes palette-indexed 8-bit BGRA DDS",()=>{
+ const payload=Buffer.alloc(1024+2);
+ payload.set([0,0,255,255],0); // palette entry 0: opaque red in BGRA
+ payload.set([255,0,0,128],4); // palette entry 1: half-alpha blue in BGRA
+ payload[1024]=0; payload[1025]=1;
+ const d=decodeDDS(dds({width:2,height:1,flags:0x20,bits:8,payload}));
+ assert.deepEqual([...d.rgba],[255,0,0,255,0,0,255,128]);
+});
 test("decodes luminance 8-bit",()=>{
  const d=decodeDDS(dds({flags:0x20000,bits:8,masks:[255,0,0,0],payload:Buffer.from([127,...Array(15).fill(0)])}));
  assert.deepEqual([...d.rgba.slice(0,4)],[127,127,127,255]);

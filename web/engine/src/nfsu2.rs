@@ -266,6 +266,71 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
     Ok(CarTextureInfo{key,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
 }
+
+fn rgb565(v:u16)->[u8;3] {
+    let r=((v>>11)&31) as u8; let g=((v>>5)&63) as u8; let b=(v&31) as u8;
+    [(r<<3)|(r>>2),(g<<2)|(g>>4),(b<<3)|(b>>2)]
+}
+fn color_table(c0:u16,c1:u16,force_four:bool)->[[u8;4];4] {
+    let a=rgb565(c0); let b=rgb565(c1);
+    let mut p=[[0u8;4];4];
+    p[0]=[a[0],a[1],a[2],255]; p[1]=[b[0],b[1],b[2],255];
+    if c0>c1 || force_four {
+        for k in 0..3 { p[2][k]=((2*a[k] as u16+b[k] as u16)/3) as u8; p[3][k]=((a[k] as u16+2*b[k] as u16)/3) as u8; }
+        p[2][3]=255; p[3][3]=255;
+    } else {
+        for k in 0..3 { p[2][k]=((a[k] as u16+b[k] as u16)/2) as u8; }
+        p[2][3]=255; p[3]=[0,0,0,0];
+    }
+    p
+}
+fn dxt5_alpha_table(a0:u8,a1:u8)->[u8;8] {
+    let mut t=[0u8;8]; t[0]=a0;t[1]=a1;
+    if a0>a1 { for i in 1..7 {t[i+1]=(((7-i) as u16*a0 as u16+i as u16*a1 as u16)/7) as u8;} }
+    else { for i in 1..5 {t[i+1]=(((5-i) as u16*a0 as u16+i as u16*a1 as u16)/5) as u8;} t[6]=0;t[7]=255; }
+    t
+}
+pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
+    let w=tex.width as usize; let h=tex.height as usize;
+    let mut out=vec![0u8;w*h*4];
+    if tex.format==CarPixelFormat::A8R8G8B8 {
+        if tex.pixels.len()<w*h*4 {return Err(NfsError::Truncated("ARGB8 pixels"));}
+        for i in 0..w*h { let q=i*4; out[q]=tex.pixels[q+2];out[q+1]=tex.pixels[q+1];out[q+2]=tex.pixels[q];out[q+3]=tex.pixels[q+3];}
+        return Ok(out);
+    }
+    let dxt1=tex.format==CarPixelFormat::Dxt1;
+    let block_bytes=if dxt1 {8} else {16};
+    let bw=(w+3)/4; let bh=(h+3)/4; let needed=bw*bh*block_bytes;
+    if tex.pixels.len()<needed {return Err(NfsError::Truncated("DXT pixel blocks"));}
+    for by in 0..bh { for bx in 0..bw {
+        let q=(by*bw+bx)*block_bytes;
+        let (alpha, color_at):(Option<[u8;16]>,usize)=match tex.format {
+            CarPixelFormat::Dxt1=>(None,q),
+            CarPixelFormat::Dxt3=>{
+                let bits=u64::from_le_bytes(tex.pixels[q..q+8].try_into().unwrap());
+                let mut a=[0u8;16]; for i in 0..16 {a[i]=(((bits>>(4*i))&15) as u8)*17;} (Some(a),q+8)
+            },
+            CarPixelFormat::Dxt5=>{
+                let tab=dxt5_alpha_table(tex.pixels[q],tex.pixels[q+1]);
+                let mut bits=0u64; for i in 0..6 {bits|=(tex.pixels[q+2+i] as u64)<<(8*i);}
+                let mut a=[0u8;16]; for i in 0..16 {a[i]=tab[((bits>>(3*i))&7) as usize];} (Some(a),q+8)
+            },
+            CarPixelFormat::A8R8G8B8=>unreachable!(),
+        };
+        let c0=u16::from_le_bytes(tex.pixels[color_at..color_at+2].try_into().unwrap());
+        let c1=u16::from_le_bytes(tex.pixels[color_at+2..color_at+4].try_into().unwrap());
+        let sel=u32::from_le_bytes(tex.pixels[color_at+4..color_at+8].try_into().unwrap());
+        let pal=color_table(c0,c1,!dxt1);
+        for py in 0..4 {for px in 0..4 {
+            let x=bx*4+px;let y=by*4+py;if x>=w||y>=h {continue;}
+            let i=py*4+px;let mut color=pal[((sel>>(2*i))&3) as usize];
+            if let Some(a)=alpha {color[3]=a[i];}
+            let o=(y*w+x)*4;out[o..o+4].copy_from_slice(&color);
+        }}
+    }}
+    Ok(out)
+}
+
 pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,Vec<CarTextureInfo>)>,NfsError>{
     fn walk(src:&[u8],nodes:&[ChunkNode],max_block:usize,out:&mut Vec<(ChunkNode,Vec<CarTextureInfo>)>)->Result<(),NfsError>{
         for n in nodes {
@@ -356,6 +421,21 @@ mod tests {
         raw[8..12].copy_from_slice(&1u32.to_le_bytes());
         let slot=TextureSlot{key:2,offset:0,compressed_size:128,decoded_size:128,header_from_end:256,unknown:0};
         assert!(decode_car_slot(&raw,slot,1024).is_err());
+    }
+
+
+    #[test]
+    fn decodes_known_dxt1_color_block() {
+        let mut pixels=vec![0u8;8];
+        pixels.copy_from_slice(&[0x00,0xF8,0x1F,0x00,0b11100100,0,0,0]);
+        let t=CarTextureInfo{key:1,width:4,height:4,format:CarPixelFormat::Dxt1,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:8,decoded_size:8,header_from_end:0,unknown:0},pixels};
+        let rgba=decode_car_pixels(&t).unwrap();
+        assert_eq!(&rgba[..16],&[255,0,0,255,0,0,255,255,170,0,85,255,85,0,170,255]);
+    }
+    #[test]
+    fn decodes_argb8_channel_order() {
+        let t=CarTextureInfo{key:1,width:1,height:1,format:CarPixelFormat::A8R8G8B8,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},pixels:vec![3,2,1,4]};
+        assert_eq!(decode_car_pixels(&t).unwrap(),vec![1,2,3,4]);
     }
 
     #[test]

@@ -41,17 +41,37 @@ pub fn decode_texture(data: &[u8], index: usize) -> Result<JsValue, JsValue> {
     js_sys::Reflect::set(&obj, &"rgba".into(), &rgba.into()).map_err(|_| fail("Gagal membentuk data preview tekstur."))?;
     Ok(obj.into())
 }
-#[wasm_bindgen]
-pub fn replace_texture(data: &[u8], index: usize, rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+fn replace_texture_inner(data: &[u8], index: usize, rgba: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, bool), JsValue> {
     check(data)?;
-    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE { return Err(fail("Dimensi gambar pengganti tidak valid.")); }
-    let expected = (width as usize).checked_mul(height as usize).and_then(|v| v.checked_mul(4)).ok_or_else(|| fail("Ukuran buffer overflow."))?;
+    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
+        return Err(fail("Dimensi gambar pengganti tidak valid."));
+    }
+    let expected = (width as usize).checked_mul(height as usize).and_then(|v| v.checked_mul(4))
+        .ok_or_else(|| fail("Ukuran buffer overflow."))?;
     if rgba.len() != expected { return Err(fail("Buffer gambar harus RGBA 8-bit.")); }
     let entries = Tpk::directory(data).map_err(|e| fail(format!("Direktori TPK tidak valid: {e}")))?;
     let entry = entries.get(index).ok_or_else(|| fail("Indeks tekstur tidak ditemukan."))?;
     let old = Tpk::decode_one(data, entry).map_err(|e| fail(format!("Tekstur tujuan tidak dapat dibaca: {e}")))?;
-    if old.width != width || old.height != height { return Err(fail(format!("Ukuran {width}x{height} tidak cocok; target {}x{}.", old.width, old.height))); }
-    let (edited, _) = replace_image(data, AssetHash(entry.hash.0), rgba, width, height).map_err(|e| fail(format!("Penggantian gagal: {e}")))?;
+    if old.width != width || old.height != height {
+        return Err(fail(format!("Ukuran {width}x{height} tidak cocok; target {}x{}.", old.width, old.height)));
+    }
+    let (edited, relocated) = replace_image(data, AssetHash(entry.hash.0), rgba, width, height)
+        .map_err(|e| fail(format!("Penggantian gagal: {e}")))?;
     if edited.len() > MAX_ARCHIVE { return Err(fail("Hasil BIN melebihi batas 60 MiB.")); }
-    Ok(edited)
+    Ok((edited, relocated))
+}
+#[wasm_bindgen]
+pub fn replace_texture(data: &[u8], index: usize, rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    replace_texture_inner(data, index, rgba, width, height).map(|(edited, _)| edited)
+}
+#[wasm_bindgen]
+pub fn replace_texture_with_status(data: &[u8], index: usize, rgba: &[u8], width: u32, height: u32) -> Result<JsValue, JsValue> {
+    let (edited, relocated) = replace_texture_inner(data, index, rgba, width, height)?;
+    let obj = js_sys::Object::new();
+    let bytes = js_sys::Uint8Array::from(edited.as_slice());
+    js_sys::Reflect::set(&obj, &"data".into(), &bytes.into())
+        .map_err(|_| fail("Gagal membentuk hasil BIN."))?;
+    js_sys::Reflect::set(&obj, &"relocated".into(), &relocated.into())
+        .map_err(|_| fail("Gagal membentuk status arsip."))?;
+    Ok(obj.into())
 }

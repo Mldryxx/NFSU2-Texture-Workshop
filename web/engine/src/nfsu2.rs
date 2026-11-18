@@ -478,7 +478,7 @@ mod tests {
     fn reads_name_from_validated_huff_trailer() {
         let key=0x00123456u32;
         let mut raw=vec![0u8;144];
-        raw[..20].copy_from_slice(b"SKYLINE_WILD_059_MASK");
+        raw[..b"SKYLINE_WILD_059_MASK".len()].copy_from_slice(b"SKYLINE_WILD_059_MASK");
         raw[0x18..0x1c].copy_from_slice(&key.to_le_bytes());
         assert_eq!(car_texture_name(&raw,key).as_deref(),Some("SKYLINE_WILD_059_MASK"));
         assert_eq!(car_texture_name(&raw,key+1),None);

@@ -340,7 +340,7 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     let width=u16::from_le_bytes(raw[p+0x20..p+0x22].try_into().unwrap());
     let height=u16::from_le_bytes(raw[p+0x22..p+0x24].try_into().unwrap());
     let code=raw[p+0x26];
-    let format=match code {0x20=>CarPixelFormat::A8R8G8B8,0x22=>CarPixelFormat::Dxt1,0x24=>CarPixelFormat::Dxt3,0x26=>CarPixelFormat::Dxt5,_=>return Err(NfsError::Unsupported("car texture pixel format"))};
+    let format=match code {0x20=>CarPixelFormat::A8R8G8B8,0x08|0x22=>CarPixelFormat::Dxt1,0x80|0x24=>CarPixelFormat::Dxt3,0x81|0x26=>CarPixelFormat::Dxt5,_=>return Err(NfsError::Unsupported("car texture pixel format"))};
     if width==0 || height==0 || width as usize*height as usize>4_194_304 { return Err(NfsError::Invalid("car texture dimensions")); }
     let mut total=0usize; let mut mips=0u8; let (mut w,mut h)=(width as usize,height as usize);
     for _ in 0..16 {

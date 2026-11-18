@@ -324,7 +324,7 @@ pub fn parse_chunks(src:&[u8])->Result<Vec<ChunkNode>,NfsError>{ parse_chunk_ran
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum CarPixelFormat { A8R8G8B8, Dxt1, Dxt3, Dxt5 }
 #[derive(Debug,Clone,PartialEq,Eq)]
-pub struct CarTextureInfo { pub key:u32, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub pixels:Vec<u8> }
+pub struct CarTextureInfo { pub key:u32, pub name:Option<String>, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub pixels:Vec<u8> }
 fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
     match fmt {
         CarPixelFormat::A8R8G8B8=>w*h*4,
@@ -352,7 +352,18 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
         w=(w/2).max(1); h=(h/2).max(1);
     }
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
-    Ok(CarTextureInfo{key,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
+    // Vinyl names are stored in the final 144-byte record of HUFF payloads,
+    // not in the 24-byte slot table. Validate its embedded key before trusting it.
+    let name=if is_huff(slot.block(archive)?) && raw.len()>=144 {
+        let record=&raw[raw.len()-144..];
+        let record_key=u32::from_le_bytes(record[0x18..0x1c].try_into().unwrap());
+        let bytes=&record[..24];
+        let end=bytes.iter().position(|b|*b==0).unwrap_or(bytes.len());
+        if record_key==slot.key && end>0 && bytes[..end].iter().all(|b|(32..=126).contains(b)) {
+            Some(String::from_utf8_lossy(&bytes[..end]).trim().to_string())
+        } else { None }
+    } else { None };
+    Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
 }
 
 fn rgb565(v:u16)->[u8;3] {

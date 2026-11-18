@@ -31,8 +31,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
-      - name: Build WebAssembly engine
-        working-directory: web/engine
+      - name: Test native Rust engine primitives\n        working-directory: web/engine\n        run: cargo test --lib\n      - name: Build WebAssembly engine\n        working-directory: web/engine
         run: wasm-pack build --target web --release --out-dir ../site/pkg
       - name: Upload downloadable web app
         uses: actions/upload-artifact@v4

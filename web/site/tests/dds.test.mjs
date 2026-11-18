@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { decodeDDS } from "../dds.js";
 
-function dds({width=4,height=4,flags=4,fourCC="DXT1",bits=0,masks=[0,0,0,0],payload=Buffer.alloc(8)}={}) {
+function dds({width=4,height=4,flags=4,fourCC="DXT1",bits=0,masks=[0,0,0,0],pitch=0,payload=Buffer.alloc(8)}={}) {
   const b=Buffer.alloc(128+payload.length);
   b.write("DDS ",0,"ascii"); b.writeUInt32LE(124,4);
-  b.writeUInt32LE(height,12); b.writeUInt32LE(width,16);
+  b.writeUInt32LE(height,12); b.writeUInt32LE(width,16); b.writeUInt32LE(pitch,20);
   b.writeUInt32LE(32,76); b.writeUInt32LE(flags,80);
   b.write(fourCC,84,"ascii"); b.writeUInt32LE(bits,88);
   masks.forEach((m,i)=>b.writeUInt32LE(m,92+i*4));
@@ -55,4 +55,17 @@ test("rejects unsupported FourCC and truncated payload",()=>{
 });
 test("rejects invalid dimensions",()=>{
  assert.throws(()=>decodeDDS(dds({width:0})),/Dimensi/);
+});
+
+test("respects padded RGB24 row pitch",()=>{
+ const payload=Buffer.from([0,0,255,99, 0,255,0,99]);
+ const d=decodeDDS(dds({width:1,height:2,flags:0x40,bits:24,pitch:4,masks:[0x00ff0000,0x0000ff00,0x000000ff,0],payload}));
+ assert.deepEqual([...d.rgba.slice(0,4)],[255,0,0,255]);
+ assert.deepEqual([...d.rgba.slice(4,8)],[0,255,0,255]);
+});
+test("respects padded luminance row pitch",()=>{
+ const payload=Buffer.from([20,99, 80,99]);
+ const d=decodeDDS(dds({width:1,height:2,flags:0x20000,bits:8,pitch:2,masks:[255,0,0,0],payload}));
+ assert.deepEqual([...d.rgba.slice(0,4)],[20,20,20,255]);
+ assert.deepEqual([...d.rgba.slice(4,8)],[80,80,80,255]);
 });

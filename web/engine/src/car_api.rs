@@ -67,7 +67,7 @@ pub fn list_car_textures(data:&[u8])->Result<JsValue,JsValue>{
     for (index,slot) in slots {
         let t=decode_info(data,slot).map_err(|e|fail(format!("Tekstur {index} tidak dapat dibaca: {e}")))?;
         let hash=format!("0x{:08X}",slot.key);
-        out.push(TextureInfo{index,hash:hash.clone(),name:hash,width:t.width as u32,height:t.height as u32,compressed_size:slot.compressed_size,decoded_size:slot.decoded_size});
+        out.push(TextureInfo{index,hash:hash.clone(),name:t.name.clone().filter(|s|!s.is_empty()).unwrap_or_else(||hash.clone()),width:t.width as u32,height:t.height as u32,compressed_size:slot.compressed_size,decoded_size:slot.decoded_size});
     }
     serde_wasm_bindgen::to_value(&out).map_err(fail)
 }

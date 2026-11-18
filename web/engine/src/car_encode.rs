@@ -145,6 +145,48 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
     Ok(out)
 }
 
+
+/// Apply several slot replacements atomically without changing any archive offsets.
+/// Existing slot extents are treated as fixed-capacity regions; a replacement that
+/// does not fit is rejected rather than moving opaque BIN data or corrupting offsets.
+pub fn replace_car_texture_slots(
+    archive:&[u8],
+    textures:&[CarTextureInfo],
+    replacements:&[(usize,&[u8],u32,u32)],
+)->Result<Vec<u8>,NfsError> {
+    use crate::nfsu2::{compress_jdlz,decompress_block};
+    use std::collections::HashSet;
+    if replacements.is_empty() {return Err(NfsError::Invalid("no texture replacements supplied"));}
+    let mut seen=HashSet::new();
+    let mut patches:Vec<(usize,usize,Vec<u8>)>=Vec::with_capacity(replacements.len());
+    for (index,rgba,w,h) in replacements {
+        if !seen.insert(*index) {return Err(NfsError::Invalid("duplicate texture index in replacement set"));}
+        let tex=textures.get(*index).ok_or(NfsError::Invalid("texture index not found"))?;
+        let mut raw=decompress_block(tex.slot.block(archive)?,64*1024*1024)?;
+        if raw.len()!=tex.slot.decoded_size as usize {return Err(NfsError::Invalid("decoded slot size changed"));}
+        let encoded=encode_car_pixels(tex,rgba,*w,*h)?;
+        if encoded.len()!=tex.pixels.len() || encoded.len()>raw.len() {return Err(NfsError::Invalid("replacement pixel extent is invalid"));}
+        raw[..encoded.len()].copy_from_slice(&encoded);
+        let packed=compress_jdlz(&raw)?;
+        if packed.len()>tex.slot.compressed_size as usize {
+            return Err(NfsError::Invalid("replacement exceeds reserved compressed slot; archive relocation is required"));
+        }
+        let start=tex.slot.offset as usize;
+        let end=start.checked_add(tex.slot.compressed_size as usize).ok_or(NfsError::OutOfRange)?;
+        if end>archive.len() {return Err(NfsError::OutOfRange);}
+        let mut region=vec![0u8;tex.slot.compressed_size as usize];
+        region[..packed.len()].copy_from_slice(&packed);
+        patches.push((start,end,region));
+    }
+    patches.sort_by_key(|p|p.0);
+    for pair in patches.windows(2) {
+        if pair[0].1>pair[1].0 {return Err(NfsError::Invalid("replacement slot regions overlap"));}
+    }
+    let mut output=archive.to_vec();
+    for (start,end,region) in patches {output[start..end].copy_from_slice(&region);}
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -239,6 +239,48 @@ mod tests {
             assert_eq!(packed.len(),t.pixels.len());
         }
     }
+    fn chunk(id:u32,payload:&[u8])->Vec<u8>{
+        let mut b=Vec::new();b.extend_from_slice(&id.to_le_bytes());b.extend_from_slice(&(payload.len() as u32).to_le_bytes());b.extend_from_slice(payload);b
+    }
+    fn synthetic_archive()->Vec<u8>{
+        let key=0x10203040u32;
+        let mut raw=vec![0u8;128];
+        raw[8..12].copy_from_slice(&key.to_le_bytes());
+        raw[8+0x20..8+0x22].copy_from_slice(&4u16.to_le_bytes());
+        raw[8+0x22..8+0x24].copy_from_slice(&4u16.to_le_bytes());
+        raw[8+0x26]=0x22;
+        let packed=crate::nfsu2::compress_jdlz(&raw).unwrap();
+        let mut record=Vec::new();
+        for v in [key,0,packed.len() as u32,raw.len() as u32,256,0] {record.extend_from_slice(&v.to_le_bytes());}
+        let info=chunk(0xB3310000,&chunk(0x33310003,&record));
+        let data=chunk(0xB3320000,&chunk(0x33320002,&packed));
+        let mut root_payload=Vec::new();root_payload.extend_from_slice(&info);root_payload.extend_from_slice(&data);
+        let mut archive=chunk(0xB3300000,&root_payload);
+        let offset=(8+info.len()+8+8) as u32;
+        archive[8+8+8+4..8+8+8+8].copy_from_slice(&offset.to_le_bytes());
+        archive
+    }
+    #[test]
+    fn replaces_texture_and_relocates_slot_without_touching_original() {
+        use crate::nfsu2::{decode_car_slot,find_car_slot_tables};
+        let original=synthetic_archive();
+        let tables=find_car_slot_tables(&original).unwrap();
+        let slot=tables[0].1[0];
+        let tex=decode_car_slot(&original,slot,1024).unwrap();
+        let before=original.clone();
+        let rgba=vec![255u8,0,0,255].repeat(16);
+        let output=replace_car_texture_slots(&original,&[tex],&[(0,&rgba,4,4)]).unwrap();
+        assert_eq!(original,before);
+        assert!(output.len()>original.len());
+        let slots=find_car_slot_tables(&output).unwrap();
+        assert_ne!(slots[0].1[0].offset,slot.offset);
+        let edited=decode_car_slot(&output,slots[0].1[0],1024).unwrap();
+        assert_eq!((edited.width,edited.height),(4,4));
+        assert_eq!(edited.pixels.len(),8);
+        let tree=crate::nfsu2::parse_chunks(&output).unwrap();
+        assert_eq!(tree[0].offset+8+tree[0].size,output.len());
+    }
+
     #[test]
     fn rejects_wrong_dimensions_and_buffer_lengths() {
         let t=texture(CarPixelFormat::Dxt1,4,4,1);

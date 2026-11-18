@@ -16,6 +16,7 @@ struct TextureInfo {
     height:u32,
     compressed_size:u32,
     decoded_size:u32,
+    can_replace:bool,
 }
 fn fail(e:impl std::fmt::Display)->JsValue {JsValue::from_str(&e.to_string())}
 fn check(data:&[u8])->Result<(),JsValue>{
@@ -67,7 +68,7 @@ pub fn list_car_textures(data:&[u8])->Result<JsValue,JsValue>{
     for (index,slot) in slots {
         let t=decode_info(data,slot).map_err(|e|fail(format!("Tekstur {index} tidak dapat dibaca: {e}")))?;
         let hash=format!("0x{:08X}",slot.key);
-        out.push(TextureInfo{index,hash:hash.clone(),name:t.name.clone().filter(|s|!s.is_empty()).unwrap_or_else(||hash.clone()),width:t.width as u32,height:t.height as u32,compressed_size:slot.compressed_size,decoded_size:slot.decoded_size});
+        out.push(TextureInfo{index,hash:hash.clone(),name:t.name.clone().filter(|s|!s.is_empty()).unwrap_or_else(||hash.clone()),width:t.width as u32,height:t.height as u32,compressed_size:slot.compressed_size,decoded_size:slot.decoded_size,can_replace:t.format!=crate::nfsu2::CarPixelFormat::Indexed8});
     }
     serde_wasm_bindgen::to_value(&out).map_err(fail)
 }
@@ -80,6 +81,7 @@ pub fn decode_car_texture(data:&[u8],index:usize)->Result<JsValue,JsValue>{
     let obj=js_sys::Object::new();
     js_sys::Reflect::set(&obj,&"width".into(),&t.width.into()).map_err(|_|fail("Gagal membentuk preview."))?;
     js_sys::Reflect::set(&obj,&"height".into(),&t.height.into()).map_err(|_|fail("Gagal membentuk preview."))?;
+    js_sys::Reflect::set(&obj,&"canReplace".into(),&(t.format!=crate::nfsu2::CarPixelFormat::Indexed8).into()).map_err(|_|fail("Gagal membentuk status format."))?;
     let bytes=js_sys::Uint8Array::from(rgba.as_slice());
     js_sys::Reflect::set(&obj,&"rgba".into(),&bytes.into()).map_err(|_|fail("Gagal membentuk preview."))?;
     Ok(obj.into())

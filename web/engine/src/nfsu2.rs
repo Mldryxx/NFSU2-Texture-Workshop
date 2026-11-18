@@ -332,6 +332,17 @@ fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
         CarPixelFormat::Dxt3|CarPixelFormat::Dxt5=>((w+3)/4)*((h+3)/4)*16,
     }
 }
+fn car_texture_name(raw:&[u8],key:u32)->Option<String> {
+    if raw.len()<144 { return None; }
+    let record=&raw[raw.len()-144..];
+    let record_key=u32::from_le_bytes(record[0x18..0x1c].try_into().ok()?);
+    let bytes=&record[..24];
+    let end=bytes.iter().position(|b|*b==0).unwrap_or(bytes.len());
+    if record_key!=key || end==0 || !bytes[..end].iter().all(|b|(32..=126).contains(b)) { return None; }
+    let name=std::str::from_utf8(&bytes[..end]).ok()?.trim();
+    if name.is_empty() { None } else { Some(name.to_string()) }
+}
+
 pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
     let raw=decompress_block(slot.block(archive)?,max_output)?;
     if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
@@ -354,15 +365,7 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
     // Vinyl names are stored in the final 144-byte record of HUFF payloads,
     // not in the 24-byte slot table. Validate its embedded key before trusting it.
-    let name=if is_huff(slot.block(archive)?) && raw.len()>=144 {
-        let record=&raw[raw.len()-144..];
-        let record_key=u32::from_le_bytes(record[0x18..0x1c].try_into().unwrap());
-        let bytes=&record[..24];
-        let end=bytes.iter().position(|b|*b==0).unwrap_or(bytes.len());
-        if record_key==slot.key && end>0 && bytes[..end].iter().all(|b|(32..=126).contains(b)) {
-            Some(String::from_utf8_lossy(&bytes[..end]).trim().to_string())
-        } else { None }
-    } else { None };
+    let name=if is_huff(slot.block(archive)?) { car_texture_name(&raw,slot.key) } else { None };
     Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
 }
 
@@ -471,6 +474,17 @@ pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reads_name_from_validated_huff_trailer() {
+        let key=0x00123456u32;
+        let mut raw=vec![0u8;144];
+        raw[..20].copy_from_slice(b"SKYLINE_WILD_059_MASK");
+        raw[0x18..0x1c].copy_from_slice(&key.to_le_bytes());
+        assert_eq!(car_texture_name(&raw,key).as_deref(),Some("SKYLINE_WILD_059_MASK"));
+        assert_eq!(car_texture_name(&raw,key+1),None);
+        raw[0]=0xff;
+        assert_eq!(car_texture_name(&raw,key),None);
+    }
     #[test]
     fn parses_slot_records_without_changing_values() {
         let mut b=Vec::new();

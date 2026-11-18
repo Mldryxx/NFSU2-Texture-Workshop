@@ -6,17 +6,18 @@ Offline-first Android-friendly browser editor for Need for Speed: Underground 2 
 
 The WebAssembly engine is now an independent Rust implementation. It no longer depends on gizmo-nfs or the previous PryHUB engine.
 
-- Parses the NFSU2 0xB3300000 texture-pack tree and the 24-byte compressed car-texture slot table.
+- Parses the NFSU2 0xB3300000 texture-pack tree and the 24-byte compressed car/vinyl texture slot table.
 - Decodes JDLZ and HUFF blocks.
 - Reads the vinyl-pack format codes used by the tested SKYLINEVINYLSORI.BIN archive: DXT1 (0x08), DXT3 (0x80), DXT5 (0x81), and ARGB8 (0x20), plus the standard NFSU2 DXT codes.
 - Decodes and re-encodes DXT1, DXT3, DXT5, and ARGB8 textures at their original dimensions.
+- Reads dimensions and pixel format from the embedded texture header using the documented `decoded_size - header_from_end + 0x88` offset formula. It does not guess metadata from a fabricated 144-byte trailer.
 - Regenerates the target mip chain from the imported top-level DDS image.
 - Replaces one texture or a Base/Mask pair atomically. Changed slots are appended on 128-byte boundaries; slot offsets and enclosing chunk sizes are updated. Untouched compressed slots remain byte-for-byte unchanged.
 - Keeps the original BIN in memory unchanged and exports a separate edited archive.
 
 ## Base and Mask workflow
 
-Some compressed vinyl packs expose texture hashes rather than readable texture names. In that case, select a texture in the list and use Jadikan Base or Jadikan Mask to choose the two target slots. Import the matching DDS files and apply them together.
+The 24-byte compressed car/vinyl slot table stores a 32-bit texture hash, not the original texture-name string. The standard compressed-car TPK reference reader also exposes hashes for these slots; the string cannot be recovered from the archive alone. The workshop therefore displays and searches by hash until a verified external hash-to-name dictionary or user-provided alias map is available. Select a texture and use Jadikan Base or Jadikan Mask to choose target slots. Import matching DDS files and apply them together.
 
 ## Safety and limitations
 

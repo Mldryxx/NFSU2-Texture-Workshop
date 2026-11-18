@@ -637,4 +637,19 @@ mod tests {
         let s=TextureSlot{key:1,offset:8,compressed_size:9,decoded_size:0,header_from_end:0,unknown:0};
         assert!(s.block(&[0;16]).is_err());
     }
+    #[test]
+    fn previews_palette_indexed_vinyl_with_transparent_dominant_index() {
+        let t=CarTextureInfo{
+            key:1,name:Some("VINYL_TEST".into()),width:4,height:4,
+            format:CarPixelFormat::Indexed8,mip_count:1,
+            slot:TextureSlot{key:1,offset:0,compressed_size:16,decoded_size:16,header_from_end:0,unknown:0},
+            pixels:vec![0,0,0,0,0,1,1,0,0,1,2,0,0,0,0,0],
+        };
+        let rgba=decode_car_pixels(&t).unwrap();
+        assert_eq!(rgba.len(),64);
+        assert_eq!(rgba[3],0);
+        assert_eq!(rgba[(5*4)+3],255);
+        assert_eq!(rgba[(10*4)+3],255);
+    }
+
 }

@@ -444,7 +444,7 @@ pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
                 let mut bits=0u64; for i in 0..6 {bits|=(tex.pixels[q+2+i] as u64)<<(8*i);}
                 let mut a=[0u8;16]; for i in 0..16 {a[i]=tab[((bits>>(3*i))&7) as usize];} (Some(a),q+8)
             },
-            CarPixelFormat::A8R8G8B8=>unreachable!(),
+            CarPixelFormat::A8R8G8B8|CarPixelFormat::Indexed8=>unreachable!(),
         };
         let c0=u16::from_le_bytes(tex.pixels[color_at..color_at+2].try_into().unwrap());
         let c1=u16::from_le_bytes(tex.pixels[color_at+2..color_at+4].try_into().unwrap());

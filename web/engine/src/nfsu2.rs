@@ -282,7 +282,7 @@ pub fn decompress_block(data: &[u8], max_output: usize) -> Result<Vec<u8>, NfsEr
         if raw > max_output { return Err(NfsError::Invalid("decompressed block exceeds limit")); }
         decompress_jdlz(data)
     } else if is_huff(data) {
-        Err(NfsError::Unsupported("HUFF decoder is the next engine module"))
+        decompress_huff(data, max_output)
     } else {
         if data.len() > max_output { return Err(NfsError::Invalid("raw block exceeds limit")); }
         Ok(data.to_vec())

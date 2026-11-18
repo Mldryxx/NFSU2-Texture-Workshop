@@ -1,6 +1,6 @@
 //! Pure-Rust encoder for the compressed-car texture formats used by NFSU2.
 //! Input and output pixels are RGBA8; storage remains in the slot's original format.
-use crate::nfsu2::{CarPixelFormat, CarTextureInfo, NfsError};
+use crate::nfsu2::{CarPixelFormat, CarTextureInfo, NfsError, TextureSlot};
 
 fn to565(c: [u8; 4]) -> u16 {
     (((c[0] as u16 * 31 + 127) / 255) << 11)

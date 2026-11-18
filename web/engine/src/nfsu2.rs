@@ -333,39 +333,10 @@ fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
         CarPixelFormat::Indexed8=>w*h,
     }
 }
-fn car_texture_name(raw:&[u8],key:u32)->Option<String> {
-    if raw.len()<144 { return None; }
-    let record=&raw[raw.len()-144..];
-    let record_key=u32::from_le_bytes(record[0x18..0x1c].try_into().ok()?);
-    let bytes=&record[..24];
-    let end=bytes.iter().position(|b|*b==0).unwrap_or(bytes.len());
-    if record_key!=key || end==0 || !bytes[..end].iter().all(|b|(32..=126).contains(b)) { return None; }
-    let name=std::str::from_utf8(&bytes[..end]).ok()?.trim();
-    if name.is_empty() { None } else { Some(name.to_string()) }
-}
 
 pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
     let raw=decompress_block(slot.block(archive)?,max_output)?;
     if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
-    // VINYLS.BIN HUFF slots use a distinct 144-byte trailer.
-    if is_huff(slot.block(archive)?) && raw.len()>=144 {
-        let rec=&raw[raw.len()-144..];
-        let trailer_key=u32::from_le_bytes(rec[0x18..0x1c].try_into().unwrap());
-        let width=u16::from_le_bytes(rec[0x38..0x3a].try_into().unwrap());
-        let height=u16::from_le_bytes(rec[0x3a..0x3c].try_into().unwrap());
-        let fourcc=u32::from_le_bytes(rec[0x84..0x88].try_into().unwrap());
-        if trailer_key==slot.key && width>=8 && height>=8 && width<=4096 && height<=4096 &&
-            (width as usize)*(height as usize)<=4_194_304 {
-            let (format,pixel_len)=match fourcc {
-                0x3154_5844 => (CarPixelFormat::Dxt1,((width as usize+3)/4)*((height as usize+3)/4)*8),
-                0x3354_5844 => (CarPixelFormat::Dxt3,((width as usize+3)/4)*((height as usize+3)/4)*16),
-                _ => (CarPixelFormat::Indexed8,width as usize*height as usize),
-            };
-            if pixel_len+144>raw.len(){return Err(NfsError::Invalid("vinyl pixel data overlaps trailer"));}
-            let name=car_texture_name(&raw,slot.key);
-            return Ok(CarTextureInfo{key:slot.key,name,width,height,format,mip_count:1,slot,pixels:raw[..pixel_len].to_vec()});
-        }
-    }
     let p=slot.header_offset(raw.len())?;
     let key=u32::from_le_bytes(raw[p..p+4].try_into().unwrap());
     if key!=slot.key { return Err(NfsError::Invalid("embedded texture key mismatch")); }
@@ -383,9 +354,9 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
         w=(w/2).max(1); h=(h/2).max(1);
     }
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
-    // Vinyl names are stored in the final 144-byte record of HUFF payloads,
-    // not in the 24-byte slot table. Validate its embedded key before trusting it.
-    let name=if is_huff(slot.block(archive)?) { car_texture_name(&raw,slot.key) } else { None };
+    // Compressed car/vinyl slot tables store a 32-bit name hash, not the original string.
+    // Keep the name unresolved until an external hash dictionary is supplied.
+    let name=None;
     Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
 }
 
@@ -502,15 +473,9 @@ pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,
 mod tests {
     use super::*;
     #[test]
-    fn reads_name_from_validated_huff_trailer() {
-        let key=0x00123456u32;
-        let mut raw=vec![0u8;144];
-        raw[..b"SKYLINE_WILD_059_MASK".len()].copy_from_slice(b"SKYLINE_WILD_059_MASK");
-        raw[0x18..0x1c].copy_from_slice(&key.to_le_bytes());
-        assert_eq!(car_texture_name(&raw,key).as_deref(),Some("SKYLINE_WILD_059_MASK"));
-        assert_eq!(car_texture_name(&raw,key+1),None);
-        raw[0]=0xff;
-        assert_eq!(car_texture_name(&raw,key),None);
+    fn compressed_slot_name_is_a_hash_not_an_embedded_string() {
+        let slot=TextureSlot{key:0x00123456,offset:0,compressed_size:16,decoded_size:0,header_from_end:0,unknown:0};
+        assert_eq!(format!("0x{:08X}",slot.key),"0x00123456");
     }
     #[test]
     fn parses_slot_records_without_changing_values() {

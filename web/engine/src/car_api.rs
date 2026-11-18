@@ -110,7 +110,7 @@ pub fn replace_car_texture_pair_with_status(data:&[u8],base_index:usize,base_rgb
     let obj=js_sys::Object::new();
     let bytes=js_sys::Uint8Array::from(edited.as_slice());
     js_sys::Reflect::set(&obj,&"data".into(),&bytes.into()).map_err(|_|fail("Gagal membentuk hasil BIN."))?;
-    js_sys::Reflect::set(&obj,&"relocated".into(),&false.into()).map_err(|_|fail("Gagal membentuk status arsip."))?;
+    js_sys::Reflect::set(&obj,&"relocated".into(),&true.into()).map_err(|_|fail("Gagal membentuk status arsip."))?;
     let _=(base_local,mask_local);
     Ok(obj.into())
 }

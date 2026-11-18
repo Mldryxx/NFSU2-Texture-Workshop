@@ -203,6 +203,88 @@ pub fn decompress_block(data: &[u8], max_output: usize) -> Result<Vec<u8>, NfsEr
     }
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkNode { pub id:u32, pub offset:usize, pub payload_offset:usize, pub size:usize, pub children:Vec<ChunkNode> }
+impl ChunkNode {
+    pub fn find(&self, id:u32) -> Option<&ChunkNode> { self.children.iter().find(|n|n.id==id) }
+    pub fn find_recursive(&self,id:u32)->Option<&ChunkNode> {
+        if self.id==id { return Some(self); }
+        for n in &self.children { if let Some(v)=n.find_recursive(id) { return Some(v); } }
+        None
+    }
+    pub fn payload<'a>(&self,src:&'a [u8])->Result<&'a [u8],NfsError> {
+        src.get(self.payload_offset..self.payload_offset+self.size).ok_or(NfsError::OutOfRange)
+    }
+}
+fn parse_chunk_range(src:&[u8],start:usize,end:usize,depth:usize)->Result<Vec<ChunkNode>,NfsError>{
+    if depth>64 { return Err(NfsError::Invalid("chunk nesting too deep")); }
+    let mut out=Vec::new(); let mut at=start;
+    while at<end {
+        if end-at<8 { return Err(NfsError::Truncated("chunk header")); }
+        let id=u32::from_le_bytes(src[at..at+4].try_into().unwrap());
+        let size=u32::from_le_bytes(src[at+4..at+8].try_into().unwrap()) as usize;
+        let payload=at+8; let stop=payload.checked_add(size).ok_or(NfsError::OutOfRange)?;
+        if stop>end { return Err(NfsError::Invalid("chunk extends beyond parent")); }
+        let children=if id&0x8000_0000!=0 { parse_chunk_range(src,payload,stop,depth+1)? } else { Vec::new() };
+        out.push(ChunkNode{id,offset:at,payload_offset:payload,size,children});
+        at=stop;
+    }
+    Ok(out)
+}
+pub fn parse_chunks(src:&[u8])->Result<Vec<ChunkNode>,NfsError>{ parse_chunk_range(src,0,src.len(),0) }
+
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum CarPixelFormat { A8R8G8B8, Dxt1, Dxt3, Dxt5 }
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub struct CarTextureInfo { pub key:u32, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub pixels:Vec<u8> }
+fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
+    match fmt {
+        CarPixelFormat::A8R8G8B8=>w*h*4,
+        CarPixelFormat::Dxt1=>((w+3)/4)*((h+3)/4)*8,
+        CarPixelFormat::Dxt3|CarPixelFormat::Dxt5=>((w+3)/4)*((h+3)/4)*16,
+    }
+}
+pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
+    let raw=decompress_block(slot.block(archive)?,max_output)?;
+    if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
+    let p=slot.header_offset(raw.len())?;
+    let key=u32::from_le_bytes(raw[p..p+4].try_into().unwrap());
+    if key!=slot.key { return Err(NfsError::Invalid("embedded texture key mismatch")); }
+    let width=u16::from_le_bytes(raw[p+0x20..p+0x22].try_into().unwrap());
+    let height=u16::from_le_bytes(raw[p+0x22..p+0x24].try_into().unwrap());
+    let code=raw[p+0x26];
+    let format=match code {0x20=>CarPixelFormat::A8R8G8B8,0x22=>CarPixelFormat::Dxt1,0x24=>CarPixelFormat::Dxt3,0x26=>CarPixelFormat::Dxt5,_=>return Err(NfsError::Unsupported("car texture pixel format"))};
+    if width==0 || height==0 || width as usize*height as usize>4_194_304 { return Err(NfsError::Invalid("car texture dimensions")); }
+    let mut total=0usize; let mut mips=0u8; let (mut w,mut h)=(width as usize,height as usize);
+    for _ in 0..16 {
+        let n=mip_size(format,w,h);
+        if total.checked_add(n).filter(|v|*v<=p).is_none() { break; }
+        total+=n; mips+=1; w=(w/2).max(1); h=(h/2).max(1);
+    }
+    if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
+    Ok(CarTextureInfo{key,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
+}
+pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,Vec<CarTextureInfo>)>,NfsError>{
+    fn walk(src:&[u8],nodes:&[ChunkNode],max_block:usize,out:&mut Vec<(ChunkNode,Vec<CarTextureInfo>)>)->Result<(),NfsError>{
+        for n in nodes {
+            if n.id==0xB3300000 {
+                if let Some(info)=n.find(0xB3310000) {
+                    if let Some(table)=info.find(0x33310003) {
+                        let slots=TextureSlot::parse_table(table.payload(src)?)?;
+                        let mut textures=Vec::with_capacity(slots.len());
+                        for slot in slots { textures.push(decode_car_slot(src,slot,max_block)?); }
+                        out.push((n.clone(),textures));
+                    }
+                }
+            }
+            walk(src,&n.children,max_block,out)?;
+        }
+        Ok(())
+    }
+    let nodes=parse_chunks(src)?; let mut out=Vec::new(); walk(src,&nodes,max_block,&mut out)?; Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -213,6 +213,7 @@ pub fn compress_jdlz(raw:&[u8])->Result<Vec<u8>,NfsError> {
                     while n<limit && raw[pos+n]==raw[i+n] {n+=1;}
                     if n>=3 && best.map_or(true,|b|n>b.0 || (n==b.0 && dist<b.1)) {
                         best=Some((n,dist,dist<=16));
+                        if n>=34 { break; }
                     }
                 }
             }

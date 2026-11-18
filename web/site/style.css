@@ -33,3 +33,22 @@
   .texture-item small{text-align:left;white-space:normal}
   .texture-item span{font-size:12px;font-weight:650}
 }
+
+/* Compact pinned preview; browser owns the long scroll */
+@media(max-width:740px){
+ .workspace{display:flex;flex-direction:column;gap:10px}
+ .workspace>.preview{position:sticky;top:62px;z-index:15;order:0;padding:9px;min-height:0;max-height:235px;overflow:hidden;background:#17191f}
+ .workspace>.preview .heading{margin:0 0 6px;align-items:center;flex-wrap:nowrap}
+ .workspace>.preview .heading h2{font-size:13px;max-width:65vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .workspace>.preview .eyebrow{margin:0;font-size:9px}
+ .workspace>.preview .stage{height:175px;min-height:0}
+ .workspace>.browser{order:1}
+ .workspace>.browser .texture-list{max-height:none;overflow:visible}
+ .workspace>.editor-controls{order:2}
+}
+@media(min-width:741px){
+ .workspace{grid-template-columns:minmax(240px,.85fr) minmax(0,1.5fr)}
+ .workspace>.preview{grid-column:2;grid-row:1;position:sticky;top:82px;align-self:start}
+ .workspace>.browser{grid-column:1;grid-row:1}
+ .workspace>.editor-controls{grid-column:1/-1}
+}

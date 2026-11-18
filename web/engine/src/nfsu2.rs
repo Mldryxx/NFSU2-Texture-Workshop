@@ -554,6 +554,32 @@ mod tests {
     }
 
     #[test]
+    fn maps_both_standard_and_vinyl_format_codes() {
+        let cases=[
+            (0x08,CarPixelFormat::Dxt1,8usize),
+            (0x22,CarPixelFormat::Dxt1,8usize),
+            (0x80,CarPixelFormat::Dxt3,16usize),
+            (0x24,CarPixelFormat::Dxt3,16usize),
+            (0x81,CarPixelFormat::Dxt5,16usize),
+            (0x26,CarPixelFormat::Dxt5,16usize),
+            (0x20,CarPixelFormat::A8R8G8B8,64usize),
+        ];
+        for (code,expected,pixels) in cases {
+            let key=0xAABBCCDDu32;
+            let mut raw=vec![0u8;256];
+            let p=pixels;
+            raw[p..p+4].copy_from_slice(&key.to_le_bytes());
+            raw[p+0x20..p+0x22].copy_from_slice(&4u16.to_le_bytes());
+            raw[p+0x22..p+0x24].copy_from_slice(&4u16.to_le_bytes());
+            raw[p+0x26]=code;
+            let hfe=(raw.len()+0x88-p) as u32;
+            let slot=TextureSlot{key,offset:0,compressed_size:raw.len() as u32,decoded_size:raw.len() as u32,header_from_end:hfe,unknown:0};
+            let tex=decode_car_slot(&raw,slot,1024).unwrap();
+            assert_eq!(tex.format,expected,"format code 0x{code:02X}");
+        }
+    }
+
+    #[test]
     fn rejects_slot_outside_archive() {
         let s=TextureSlot{key:1,offset:8,compressed_size:9,decoded_size:0,header_from_end:0,unknown:0};
         assert!(s.block(&[0;16]).is_err());

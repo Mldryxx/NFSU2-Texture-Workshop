@@ -6,7 +6,7 @@ const MAX_ARCHIVE: usize = 60 * 1024 * 1024;
 const MAX_PIXELS: u64 = 4_194_304;
 const MAX_SIDE: u32 = 4096;
 #[derive(Serialize)]
-struct TextureInfo { index: usize, hash: String, width: Option<u32>, height: Option<u32>, compressed_size: u32, decoded_size: u32 }
+struct TextureInfo { index: usize, hash: String, name: String, width: Option<u32>, height: Option<u32>, compressed_size: u32, decoded_size: u32 }
 fn fail(s: impl ToString) -> JsValue { JsValue::from_str(&s.to_string()) }
 fn check(data: &[u8]) -> Result<(), JsValue> {
     if data.is_empty() { return Err(fail("File BIN kosong.")); }
@@ -21,8 +21,12 @@ pub fn list_textures(data: &[u8]) -> Result<JsValue, JsValue> {
     let entries = Tpk::directory(data).map_err(|e| fail(format!("Struktur TPK/BIN tidak valid: {e}")))?;
     let mut out = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
-        let dims = Tpk::decode_one(data, entry).ok().map(|t| (t.width, t.height));
-        out.push(TextureInfo { index, hash: format!("0x{:08X}", entry.hash.0), width: dims.map(|d| d.0), height: dims.map(|d| d.1), compressed_size: entry.size, decoded_size: entry.out_size });
+        let decoded = Tpk::decode_one(data, entry).ok();
+        let (width, height, name) = match decoded {
+            Some(t) => (Some(t.width), Some(t.height), t.name),
+            None => (None, None, String::new()),
+        };
+        out.push(TextureInfo { index, hash: format!("0x{:08X}", entry.hash.0), name, width, height, compressed_size: entry.size, decoded_size: entry.out_size });
     }
     serde_wasm_bindgen::to_value(&out).map_err(fail)
 }

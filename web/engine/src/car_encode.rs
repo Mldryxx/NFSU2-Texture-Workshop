@@ -217,7 +217,6 @@ pub fn replace_car_texture_slots(
     if reparsed.len()!=1 || reparsed[0].size!=new_root_size {return Err(NfsError::Invalid("rebuilt BIN chunk validation failed"));}
     let verified=find_car_slot_tables(&output)?;
     if verified.len()!=1 {return Err(NfsError::Invalid("rebuilt BIN slot table validation failed"));}
-    for (slot_index,_,_) in &[] as &[(usize,Vec<u8>,usize)] {let _=slot_index;}
     Ok(output)
 }
 #[cfg(test)]

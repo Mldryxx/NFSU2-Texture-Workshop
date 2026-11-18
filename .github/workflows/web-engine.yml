@@ -34,7 +34,8 @@ jobs:
       - name: Test native Rust engine primitives
         working-directory: web/engine
         run: cargo test --lib
-      - name: Build WebAssembly engine\n        working-directory: web/engine
+      - name: Build WebAssembly engine
+        working-directory: web/engine
         run: wasm-pack build --target web --release --out-dir ../site/pkg
       - name: Upload downloadable web app
         uses: actions/upload-artifact@v4

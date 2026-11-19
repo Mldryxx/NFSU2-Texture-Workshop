@@ -626,6 +626,23 @@ mod tests {
         assert!(s.block(&[0;16]).is_err());
     }
     #[test]
+    fn indexed_vinyl_preview_ranks_high_indices_without_low_nibble_aliasing() {
+        let t=CarTextureInfo{
+            key:1,name:Some("VINYL_LEVELS".into()),width:4,height:1,
+            format:CarPixelFormat::Indexed8,mip_count:1,
+            slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},
+            pixels:vec![250,250,16,32],
+        };
+        let rgba=decode_car_pixels(&t).unwrap();
+        assert_eq!(rgba[3],0); // dominant transparent background
+        assert_eq!(rgba[7],0);
+        assert_eq!(rgba[11],255);
+        assert_eq!(rgba[15],255);
+        assert!(rgba[8] < rgba[12]); // distinct increasing neutral preview levels
+        assert_eq!(&rgba[8..11], &[32,32,32]);
+        assert_eq!(&rgba[12..15], &[255,255,255]);
+    }
+    #[test]
     fn previews_palette_indexed_vinyl_with_transparent_dominant_index() {
         let t=CarTextureInfo{
             key:1,name:Some("VINYL_TEST".into()),width:4,height:4,

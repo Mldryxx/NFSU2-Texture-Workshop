@@ -107,8 +107,22 @@ pub fn replace_car_texture_pair_with_status(data:&[u8],base_index:usize,base_rgb
     if base_pack!=mask_pack{return Err(fail("Base dan Mask harus berada dalam TPK yang sama."));}
     let base=decode_info(data,base_slot).map_err(|e|fail(format!("Tekstur Base tidak dapat dibaca: {e}")))?;
     let mask=decode_info(data,mask_slot).map_err(|e|fail(format!("Tekstur Mask tidak dapat dibaca: {e}")))?;
+    // For runtime-recolored P8 vinyl slots, the paired mask must also define
+    // the artwork's transparent/background index. Keep Base RGB shade values,
+    // but combine its alpha with the mask alpha before converting to indices.
+    let mut merged_base=base_rgba.to_vec();
+    if base.format==crate::nfsu2::CarPixelFormat::Indexed8 {
+        let base_count=(base_width as usize).checked_mul(base_height as usize).ok_or_else(||fail("Ukuran Base terlalu besar."))?;
+        let mask_count=(mask_width as usize).checked_mul(mask_height as usize).ok_or_else(||fail("Ukuran Mask terlalu besar."))?;
+        if base_rgba.len()!=base_count*4 || mask_rgba.len()!=mask_count*4 || base_count!=mask_count {
+            return Err(fail("Data RGBA Base/Mask tidak cocok dengan ukuran tekstur."));
+        }
+        for i in 0..base_count {
+            merged_base[i*4+3]=merged_base[i*4+3].min(mask_rgba[i*4+3]);
+        }
+    }
     let textures=[base,mask];
-    let edited=replace_car_texture_slots(data,&textures,&[(0,base_rgba,base_width,base_height),(1,mask_rgba,mask_width,mask_height)]).map_err(fail)?;
+    let edited=replace_car_texture_slots(data,&textures,&[(0,&merged_base,base_width,base_height),(1,mask_rgba,mask_width,mask_height)]).map_err(fail)?;
     let obj=js_sys::Object::new();
     let bytes=js_sys::Uint8Array::from(edited.as_slice());
     js_sys::Reflect::set(&obj,&"data".into(),&bytes.into()).map_err(|_|fail("Gagal membentuk hasil BIN."))?;

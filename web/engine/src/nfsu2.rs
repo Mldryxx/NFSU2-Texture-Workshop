@@ -339,13 +339,13 @@ fn parse_vinyl_trailer(raw:&[u8],key:u32)->Option<(String,u16,u16,CarPixelFormat
     let rec=&raw[raw.len()-144..];
     let name_bytes=&rec[..24];
     let name_len=name_bytes.iter().position(|&b|b==0).unwrap_or(24);
-    if name_len==0 || !name_bytes[..name_len].iter().all(|b|b.is_ascii_uppercase()||b.is_ascii_digit()||*b==b'_') { return None; }
+    if name_len==0 || name_bytes[0]<b'A' || name_bytes[0]>b'Z' || !name_bytes[..name_len].iter().all(|b|b.is_ascii()&&*b>=32&&*b<=126) { return None; }
     if u32::from_le_bytes(rec[0x18..0x1c].try_into().ok()?)!=key { return None; }
     let width=u16::from_le_bytes(rec[0x38..0x3a].try_into().ok()?);
     let height=u16::from_le_bytes(rec[0x3a..0x3c].try_into().ok()?);
-    if width<8||height<8||width>4096||height>4096||(width as usize)*(height as usize)>4_194_304 { return None; }
+    if width<8||height<8||width>2048||height>2048||(width as usize)*(height as usize)>4_194_304 { return None; }
     let code=u32::from_le_bytes(rec[0x84..0x88].try_into().ok()?);
-    let format=match code {0x31545844=>CarPixelFormat::Dxt1,0x33545844=>CarPixelFormat::Dxt3,0x29|0x08|0x80|0x81=>CarPixelFormat::Indexed8,_=>return None};
+    let format=match code {0x31545844=>CarPixelFormat::Dxt1,0x33545844=>CarPixelFormat::Dxt3,0x29=>CarPixelFormat::Indexed8,_=>return None};
     let pixel_len=match format {CarPixelFormat::Indexed8=>width as usize*height as usize, _=>mip_size(format,width as usize,height as usize)};
     if pixel_len+144>raw.len(){return None;}
     Some((String::from_utf8(name_bytes[..name_len].to_vec()).ok()?,width,height,format,pixel_len))

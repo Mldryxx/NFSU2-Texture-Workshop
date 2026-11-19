@@ -1,0 +1,13 @@
+{
+  "fixture": "VINYLS.BIN",
+  "sample_file_size": 15238912,
+  "root_chunk": { "id": "0xB3300000", "offset": 0, "size": 15238904 },
+  "texture_info_chunk": { "id": "0x33310002", "offset": 204, "size": 14448, "record_size_candidate": 8, "record_count_candidate": 1806 },
+  "slot_table_chunk": { "id": "0x33310003", "offset": 14660, "size": 43344, "record_size": 24, "slot_count": 1806 },
+  "texture_pack_data": { "chunk_id": "0xB3320000", "offset": 58112, "size": 15180792 },
+  "texture_pixel_data": { "chunk_id": "0x33320002", "offset": 58240, "size": 15180664 },
+  "compression_counts": { "HUFF": 1789, "JDLZ": 17 },
+  "first_slot": { "index": 0, "key": 384519, "offset": 58368, "compressed_size": 6863, "decoded_size": 350684, "header_from_end": 256, "codec": "HUFF" },
+  "last_verified_stage": "archive chunk and slot-table parsing only",
+  "not_yet_verified": [ "TextureInfo semantic field offsets PalettePlacement/PaletteSize", "palette swizzle mapping", "decoded texture payload palette bytes", "edited BIN export byte correctness" ]
+}

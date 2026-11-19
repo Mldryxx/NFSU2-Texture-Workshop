@@ -10,14 +10,14 @@ The WebAssembly engine is now an independent Rust implementation. It no longer d
 - Decodes JDLZ and HUFF blocks.
 - Reads the vinyl-pack format codes used by the tested SKYLINEVINYLSORI.BIN archive: DXT1 (0x08), DXT3 (0x80), DXT5 (0x81), and ARGB8 (0x20), plus the standard NFSU2 DXT codes.
 - Decodes and re-encodes DXT1, DXT3, DXT5, and ARGB8 textures at their original dimensions.
-- Reads dimensions and pixel format from the embedded texture header using the documented `decoded_size - header_from_end + 0x88` offset formula. It does not guess metadata from a fabricated 144-byte trailer.
+- For vinyls, extracts the validated 24-byte texture name from the 144-byte HUFF trailer, cross-checking the embedded key/hash, printable name, dimensions and pixel-format marker. Other car textures continue using the embedded texture header offset formula `decoded_size - header_from_end + 0x88`.
 - Regenerates the target mip chain from the imported top-level DDS image.
 - Replaces one texture or a Base/Mask pair atomically. Changed slots are appended on 128-byte boundaries; slot offsets and enclosing chunk sizes are updated. Untouched compressed slots remain byte-for-byte unchanged.
 - Keeps the original BIN in memory unchanged and exports a separate edited archive.
 
 ## Base and Mask workflow
 
-The 24-byte compressed car/vinyl slot table stores a 32-bit texture hash, not the original texture-name string. The standard compressed-car TPK reference reader also exposes hashes for these slots; the string cannot be recovered from the archive alone. The workshop therefore displays and searches by hash until a verified external hash-to-name dictionary or user-provided alias map is available. Select a texture and use Jadikan Base or Jadikan Mask to choose target slots. Import matching DDS files and apply them together.
+Vinyl texture names are embedded inside the decoded HUFF slot trailer (24-byte name within a 144-byte record), not the slot table. The parser validates that record against the slot hash before showing the name. Texture search can use the recovered names or hashes. Base/Mask pairing now relies on those names when present. Select a texture and use Jadikan Base or Jadikan Mask to choose target slots. Import matching DDS files and apply them together.
 
 ## Safety and limitations
 

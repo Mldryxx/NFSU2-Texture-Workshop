@@ -334,9 +334,28 @@ fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
     }
 }
 
+fn parse_vinyl_trailer(raw:&[u8],key:u32)->Option<(String,u16,u16,CarPixelFormat,usize)> {
+    if raw.len()<144 { return None; }
+    let rec=&raw[raw.len()-144..];
+    let name_bytes=&rec[..24];
+    let name_len=name_bytes.iter().position(|&b|b==0).unwrap_or(24);
+    if name_len==0 || !name_bytes[..name_len].iter().all(|b|b.is_ascii_uppercase()||b.is_ascii_digit()||*b==b'_') { return None; }
+    if u32::from_le_bytes(rec[0x18..0x1c].try_into().ok()?)!=key { return None; }
+    let width=u16::from_le_bytes(rec[0x38..0x3a].try_into().ok()?);
+    let height=u16::from_le_bytes(rec[0x3a..0x3c].try_into().ok()?);
+    if width<8||height<8||width>4096||height>4096||(width as usize)*(height as usize)>4_194_304 { return None; }
+    let code=u32::from_le_bytes(rec[0x84..0x88].try_into().ok()?);
+    let format=match code {0x31545844=>CarPixelFormat::Dxt1,0x33545844=>CarPixelFormat::Dxt3,0x29|0x08|0x80|0x81=>CarPixelFormat::Indexed8,_=>return None};
+    let pixel_len=match format {CarPixelFormat::Indexed8=>width as usize*height as usize, _=>mip_size(format,width as usize,height as usize)};
+    if pixel_len+144>raw.len(){return None;}
+    Some((String::from_utf8(name_bytes[..name_len].to_vec()).ok()?,width,height,format,pixel_len))
+}
 pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
     let raw=decompress_block(slot.block(archive)?,max_output)?;
     if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
+    if let Some((name,width,height,format,pixel_len))=parse_vinyl_trailer(&raw,slot.key) {
+        return Ok(CarTextureInfo{key:slot.key,name:Some(name),width,height,format,mip_count:1,slot,pixels:raw[..pixel_len].to_vec()});
+    }
     let p=slot.header_offset(raw.len())?;
     let key=u32::from_le_bytes(raw[p..p+4].try_into().unwrap());
     if key!=slot.key { return Err(NfsError::Invalid("embedded texture key mismatch")); }
@@ -346,20 +365,11 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     let format=match code {0x20=>CarPixelFormat::A8R8G8B8,0x08|0x22=>CarPixelFormat::Dxt1,0x80|0x24=>CarPixelFormat::Dxt3,0x81|0x26=>CarPixelFormat::Dxt5,_=>return Err(NfsError::Unsupported("car texture pixel format"))};
     if width==0 || height==0 || width>4096 || height>4096 || width as usize*height as usize>4_194_304 { return Err(NfsError::Invalid("car texture dimensions")); }
     let mut total=0usize; let mut mips=0u8; let (mut w,mut h)=(width as usize,height as usize);
-    for _ in 0..16 {
-        let n=mip_size(format,w,h);
-        if total.checked_add(n).filter(|v|*v<=p).is_none() { break; }
-        total+=n; mips+=1;
-        if w==1 && h==1 { break; }
-        w=(w/2).max(1); h=(h/2).max(1);
-    }
+    for _ in 0..16 { let n=mip_size(format,w,h); if total.checked_add(n).filter(|v|*v<=p).is_none(){break;} total+=n;mips+=1;if w==1&&h==1{break;}w=(w/2).max(1);h=(h/2).max(1); }
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
-    // Compressed car/vinyl slot tables store a 32-bit name hash, not the original string.
-    // Keep the name unresolved until an external hash dictionary is supplied.
     let name=None;
     Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
 }
-
 fn rgb565(v:u16)->[u8;3] {
     let r=((v>>11)&31) as u8; let g=((v>>5)&63) as u8; let b=(v&31) as u8;
     [(r<<3)|(r>>2),(g<<2)|(g>>4),(b<<3)|(b>>2)]

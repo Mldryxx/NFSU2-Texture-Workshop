@@ -5,7 +5,7 @@ if(csRoot){
  let src=null,clusters=[];
  function say(s){$c("cs-message").textContent=s}
  function hex(c){return "#"+c.map(v=>v.toString(16).padStart(2,"0")).join("")}
- function quantize(data,w,h,k){
+ function autoColorCount(data,w,h){\n  const bins=new Map(),stride=Math.max(1,Math.floor((w*h)/24000));\n  for(let i=0;i<w*h;i+=stride){const p=i*4;if(data[p+3]<32)continue;const key=(data[p]>>5)+((data[p+1]>>5)<<3)+((data[p+2]>>5)<<6);bins.set(key,(bins.get(key)||0)+1);}\n  const counts=[...bins.values()],total=counts.reduce((a,b)=>a+b,0);if(!total)return 2;\n  const entropy=-counts.reduce((s,c)=>{const p=c/total;return s+p*Math.log(p)},0),effective=Math.exp(entropy);\n  return Math.max(2,Math.min(8,Math.round(effective)));\n }\n function quantize(data,w,h,k){
   const sample=[],stride=Math.max(1,Math.floor((w*h)/18000));
   for(let i=0;i<w*h;i+=stride) {const p=i*4;if(data[p+3]>32)sample.push([data[p],data[p+1],data[p+2]])}
   if(sample.length<k)throw Error("Artwork terlalu transparan atau terlalu kecil untuk jumlah warna ini.");
@@ -50,6 +50,6 @@ if(csRoot){
   $c("cs-download-all").disabled=!clusters.length;
  }
  $c("cs-input").onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{say("Memuat artwork…");const bitmap=await createImageBitmap(file);if(bitmap.width>4096||bitmap.height>4096||bitmap.width*bitmap.height>4194304)throw Error("Artwork terlalu besar (maks 4096×4096 / 4,2 MP).");const canvas=$c("cs-source"),ctx=canvas.getContext("2d");canvas.width=bitmap.width;canvas.height=bitmap.height;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0);src=ctx.getImageData(0,0,canvas.width,canvas.height);$c("cs-source-wrap").hidden=false;$c("cs-size").textContent=canvas.width+" × "+canvas.height;say("Artwork siap dipisah. Pilih jumlah layer lalu tekan Pisahkan warna.");}catch(err){say("Gagal memuat gambar: "+err)}finally{e.target.value=""}};
- $c("cs-run").onclick=()=>{if(!src)return;try{const k=Number($c("cs-count").value);say("Memisahkan warna…");clusters=quantize(src.data,src.width,src.height,k);paintLayers();say("Selesai: "+clusters.length+" layer warna. Unduh mask DDS satu per satu, lalu import ke slot vinyl Indexed8.");}catch(err){say("Color separation gagal: "+err)}};
+ $c("cs-run").onclick=()=>{if(!src)return;try{const manual=$c("cs-manual").checked;const k=manual?Number($c("cs-count").value):autoColorCount(src.data,src.width,src.height);say(manual?"Memisahkan "+k+" warna…":"Mendeteksi warna otomatis…");clusters=quantize(src.data,src.width,src.height,k);paintLayers();say((manual?"Manual ":"Otomatis ")+"selesai: "+clusters.length+" layer warna. Unduh mask DDS lalu import ke slot vinyl Indexed8.");}catch(err){say("Color separation gagal: "+err)}};
  $c("cs-download-all").onclick=()=>{clusters.forEach((layer,i)=>downloadBlob(new Blob([dds(layer.mask,src.width,src.height)],{type:"application/octet-stream"}),"vinyl_layer_"+String(i+1).padStart(2,"0")+".dds"))};
 }

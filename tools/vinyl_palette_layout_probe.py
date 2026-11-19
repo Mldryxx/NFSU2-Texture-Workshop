@@ -60,7 +60,7 @@ def probe(path):
         p = table["payload"] + idx * SLOT_BYTES
         key, off, compressed, decoded, hfe, unknown = struct.unpack_from("<6I", b, p)
         block = b[off:off + compressed]
-        kind = ("HUFF" if block.startswith(b"HUFF\\x01\\x10")
+        kind = ("HUFF" if block.startswith(b"HUFF\x01\x10")
                 else "JDLZ" if block.startswith(b"JDLZ") else "RAW")
         slots.append({"index": idx, "key": key, "offset": off,
             "compressed_size": compressed, "decoded_size": decoded,
@@ -87,5 +87,5 @@ if __name__ == "__main__":
     result = probe(args.bin_file)
     output = json.dumps(result, indent=2)
     if args.output:
-        Path(args.output).write_text(output + "\\n", encoding="utf-8")
+        Path(args.output).write_text(output + "\n", encoding="utf-8")
     print(output)

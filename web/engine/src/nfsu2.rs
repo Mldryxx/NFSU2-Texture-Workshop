@@ -483,7 +483,7 @@ pub fn find_car_texture_packs(src:&[u8],max_block:usize)->Result<Vec<(ChunkNode,
 mod tests {
     use super::*;
     #[test]
-    fn compressed_slot_name_is_a_hash_not_an_embedded_string() {
+    fn slot_hash_is_available_for_unresolved_names() {
         let slot=TextureSlot{key:0x00123456,offset:0,compressed_size:16,decoded_size:0,header_from_end:0,unknown:0};
         assert_eq!(format!("0x{:08X}",slot.key),"0x00123456");
     }

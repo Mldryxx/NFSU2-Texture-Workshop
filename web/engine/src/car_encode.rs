@@ -123,13 +123,28 @@ fn encode_level(fmt:CarPixelFormat,rgba:&[[u8;4]],w:usize,h:usize)->Vec<u8> {
     out
 }
 pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
-    if tex.format==CarPixelFormat::Indexed8 {return Err(NfsError::Unsupported("palette-indexed vinyl replacement is not implemented yet"));}
     if width!=tex.width as u32 || height!=tex.height as u32 {
         return Err(NfsError::Invalid("replacement dimensions differ from target texture"));
     }
     let count=(width as usize).checked_mul(height as usize).ok_or(NfsError::OutOfRange)?;
     if rgba.len()!=count.checked_mul(4).ok_or(NfsError::OutOfRange)? {
         return Err(NfsError::Invalid("replacement buffer must be RGBA8"));
+    }
+    if tex.format==CarPixelFormat::Indexed8 {
+        if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
+        // Vinyl slots are game-recolored P8 indices. Convert DDS luminance into
+        // the 0..15 intensity ramp used by the preview; alpha-zero becomes index 0.
+        // No RGB palette is stored in the vinyl record, so color itself cannot
+        // be preserved in this format.
+        let mut out=Vec::with_capacity(count);
+        for p in rgba.chunks_exact(4) {
+            if p[3]<128 {out.push(0);}
+            else {
+                let lum=(77u32*p[0] as u32+150u32*p[1] as u32+29u32*p[2] as u32+128)/256;
+                out.push(1+((lum*14+127)/255) as u8);
+            }
+        }
+        return Ok(out);
     }
     let mut img:Vec<[u8;4]>=rgba.chunks_exact(4).map(|p|[p[0],p[1],p[2],p[3]]).collect();
     let mut w=width as usize;let mut h=height as usize;
@@ -231,6 +246,21 @@ mod tests {
             x=(x/2).max(1);y=(y/2).max(1);
         }
         CarTextureInfo{key:1,name:None,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},pixels:vec![0;size]}
+    }
+    #[test]
+    fn converts_rgba_to_vinyl_palette_indices_and_alpha_background() {
+        let t=texture(CarPixelFormat::Indexed8,4,4,1);
+        let mut rgba=vec![255u8,255,255,255].repeat(16);
+        rgba[0..4].copy_from_slice(&[0,0,0,0]);
+        rgba[4..8].copy_from_slice(&[0,0,0,255]);
+        rgba[8..12].copy_from_slice(&[128,128,128,255]);
+        rgba[12..16].copy_from_slice(&[255,255,255,255]);
+        let indices=encode_car_pixels(&t,&rgba,4,4).unwrap();
+        assert_eq!(indices.len(),16);
+        assert_eq!(indices[0],0);
+        assert_eq!(indices[1],1);
+        assert_eq!(indices[2],8);
+        assert_eq!(indices[3],15);
     }
     #[test]
     fn encodes_all_car_formats_and_mips_to_exact_slot_size() {

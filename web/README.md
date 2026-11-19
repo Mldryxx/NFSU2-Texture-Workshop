@@ -10,7 +10,7 @@ The WebAssembly engine is now an independent Rust implementation. It no longer d
 - Decodes JDLZ and HUFF blocks.
 - Reads the vinyl-pack format codes used by the tested SKYLINEVINYLSORI.BIN archive: DXT1 (0x08), DXT3 (0x80), DXT5 (0x81), and ARGB8 (0x20), plus the standard NFSU2 DXT codes.
 - Decodes and re-encodes DXT1, DXT3, DXT5, and ARGB8 textures at their original dimensions.
-- For vinyls, extracts the validated 24-byte texture name from the 144-byte HUFF trailer, cross-checking the embedded key/hash, printable name, dimensions and pixel-format marker. Other car textures continue using the embedded texture header offset formula `decoded_size - header_from_end + 0x88`.
+- For vinyls, extracts the name, key, dimensions, and pixel format from the final 144-byte HUFF record, using the same offsets and format markers validated against OpenUG2's read-only parser. Other car textures continue using the embedded texture header offset formula `decoded_size - header_from_end + 0x88`.
 - Regenerates the target mip chain from the imported top-level DDS image.
 - Replaces one texture or a Base/Mask pair atomically. Changed slots are appended on 128-byte boundaries; slot offsets and enclosing chunk sizes are updated. Untouched compressed slots remain byte-for-byte unchanged.
 - Keeps the original BIN in memory unchanged and exports a separate edited archive.

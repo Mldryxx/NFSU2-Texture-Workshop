@@ -399,8 +399,21 @@ pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
     if tex.format==CarPixelFormat::Indexed8 {
         if tex.pixels.len()<w*h{return Err(NfsError::Truncated("indexed vinyl pixels"));}
         let mut hist=[0usize;256];for &v in tex.pixels.iter().take(w*h){hist[v as usize]+=1;}
+        // The vinyl palette is zeroed in the BIN and the game supplies colors at
+        // runtime. For a neutral preview, rank the actual used foreground indices
+        // instead of treating the low nibble as brightness (which aliases
+        // indices 16, 32, etc. and causes speckled/banded previews).
         let bg=(0..256).max_by_key(|&i|hist[i]).unwrap_or(0) as u8;
-        for i in 0..w*h {let ix=tex.pixels[i];let shade=70u8.saturating_add((ix&15).saturating_mul(12));let q=i*4;out[q]=shade;out[q+1]=shade;out[q+2]=shade;out[q+3]=if ix==bg{0}else{255};}
+        let mut levels:Vec<u8>=(0..256).filter(|&i|i!=bg as usize&&hist[i]>0).map(|i|i as u8).collect();
+        levels.sort_unstable();
+        let max_rank=levels.len().saturating_sub(1).max(1) as u32;
+        for i in 0..w*h {
+            let ix=tex.pixels[i];let q=i*4;
+            if ix==bg {out[q..q+4].copy_from_slice(&[0,0,0,0]);continue;}
+            let rank=levels.binary_search(&ix).unwrap_or(0) as u32;
+            let shade=32+((rank*223+max_rank/2)/max_rank) as u8;
+            out[q]=shade;out[q+1]=shade;out[q+2]=shade;out[q+3]=255;
+        }
         return Ok(out);
     }
     if tex.format==CarPixelFormat::A8R8G8B8 {

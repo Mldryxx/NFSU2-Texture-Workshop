@@ -1,0 +1,1 @@
+const dialog=document.getElementById("howto-dialog");const open=document.getElementById("howto-open");const close=document.getElementById("howto-close");if(dialog&&open&&close){open.addEventListener("click",()=>dialog.showModal());close.addEventListener("click",()=>dialog.close());dialog.addEventListener("click",e=>{if(e.target===dialog)dialog.close()});}

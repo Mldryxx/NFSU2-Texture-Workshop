@@ -132,13 +132,19 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
     }
     if tex.format==CarPixelFormat::Indexed8 {
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
-        // Vinyl artwork is runtime-recolored by the game. P8 indices represent
-        // a small shade ramp (about 16 used levels), not 256 independent RGB
-        // colors. Keep transparent pixels at index 0 and quantize luminance to
-        // the original 1..15 shade range instead of stretching to 1..255.
+        // The transparent index is texture-specific. In the decoded stock sample,
+        // colorable vinyls such as TEAR_012 and TEAR_038 use different dominant
+        // indices (11 and 6), and each index's palette entry is zero. Preserve
+        // the original dominant index for transparent replacement pixels.
+        // The opaque RGB-to-shade mapping remains provisional and is not claimed
+        // to reproduce the game's color-remap semantics.
+        let mut histogram=[0usize;256];
+        for &index in tex.pixels.iter().take(count) { histogram[index as usize]+=1; }
+        let mut background=0usize;
+        for i in 1..256 { if histogram[i]>histogram[background] { background=i; } }
         let mut out=Vec::with_capacity(count);
         for p in rgba.chunks_exact(4) {
-            if p[3]<128 {out.push(0);}
+            if p[3]<128 {out.push(background as u8);}
             else {
                 let lum=(77u32*p[0] as u32+150u32*p[1] as u32+29u32*p[2] as u32+128)/256;
                 out.push(1+((lum*14+127)/255) as u8);
@@ -261,6 +267,17 @@ mod tests {
         assert_eq!(indices[1],1);
         assert_eq!(indices[2],8);
         assert_eq!(indices[3],15);
+    }
+    #[test]
+    fn transparent_pixels_use_texture_specific_dominant_index() {
+        let mut t=texture(CarPixelFormat::Indexed8,4,4,1);
+        t.pixels=vec![11;16];
+        t.pixels[15]=0; // A non-background index is present but not dominant.
+        let mut rgba=vec![255u8,255,255,255].repeat(16);
+        rgba[0..4].copy_from_slice(&[255,255,255,0]);
+        let indices=encode_car_pixels(&t,&rgba,4,4).unwrap();
+        assert_eq!(indices[0],11);
+        assert_eq!(indices[1],15);
     }
     #[test]
     fn encodes_all_car_formats_and_mips_to_exact_slot_size() {

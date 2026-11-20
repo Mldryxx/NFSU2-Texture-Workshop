@@ -132,16 +132,16 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
     }
     if tex.format==CarPixelFormat::Indexed8 {
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
-        // Vinyl slots use the full 8-bit P8 index range. The old 0..15
-        // quantization discarded most of the source mask's index information and
-        // caused banding / wrong runtime vinyl colors. Keep index 0 reserved for
-        // transparent pixels; map opaque grayscale to 1..255.
+        // Vinyl artwork is runtime-recolored by the game. P8 indices represent
+        // a small shade ramp (about 16 used levels), not 256 independent RGB
+        // colors. Keep transparent pixels at index 0 and quantize luminance to
+        // the original 1..15 shade range instead of stretching to 1..255.
         let mut out=Vec::with_capacity(count);
         for p in rgba.chunks_exact(4) {
             if p[3]<128 {out.push(0);}
             else {
                 let lum=(77u32*p[0] as u32+150u32*p[1] as u32+29u32*p[2] as u32+128)/256;
-                out.push(1+((lum*254+127)/255) as u8);
+                out.push(1+((lum*14+127)/255) as u8);
             }
         }
         return Ok(out);
@@ -259,8 +259,8 @@ mod tests {
         assert_eq!(indices.len(),16);
         assert_eq!(indices[0],0);
         assert_eq!(indices[1],1);
-        assert_eq!(indices[2],128);
-        assert_eq!(indices[3],255);
+        assert_eq!(indices[2],8);
+        assert_eq!(indices[3],15);
     }
     #[test]
     fn encodes_all_car_formats_and_mips_to_exact_slot_size() {

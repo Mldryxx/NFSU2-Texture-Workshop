@@ -190,10 +190,24 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
         let remap_background=remap_palette_background(tex);
         let background=remap_background.unwrap_or(dominant as u8);
         let candidates=if remap_background.is_some() {16usize} else {256usize};
+        let mut remap_max=[0u8;3];
+        if remap_background.is_some() {
+            for i in 0..16 {
+                if Some(i as u8)==remap_background { continue; }
+                for channel in 0..3 {
+                    remap_max[channel]=remap_max[channel].max(tex.palette[i*4+channel]);
+                }
+            }
+        }
         let mut out=Vec::with_capacity(count);
         for p in rgba.chunks_exact(4) {
             if p[3]<128 {out.push(background);}
             else if tex.palette.len()==1024 {
+                if remap_background.is_some() {
+                    if (remap_max[0]==0 && p[0]>16) || (remap_max[1]==0 && p[1]>16) || (remap_max[2]==0 && p[2]>16) {
+                        return Err(NfsError::Unsupported("vinyl palette lacks an edited RGB remap channel"));
+                    }
+                }
                 let mut best=0usize;let mut best_dist=u32::MAX;
                 for i in 0..candidates {
                     let q=&tex.palette[i*4..i*4+4];
@@ -363,6 +377,22 @@ mod tests {
         let indices=encode_car_pixels(&t,&rgba,4,4).unwrap();
         assert_eq!(indices[0],11);
         assert_eq!(indices[1],15);
+    }
+    #[test]
+    fn remap_palette_rejects_unavailable_color_channel() {
+        let mut t=texture(CarPixelFormat::Indexed8,1,1,1);
+        t.pixels=vec![11];
+        t.palette=vec![0;1024];
+        let colors=[
+            [0,255,0,255],[0,0,255,255],[0,128,0,255],[0,0,128,255],
+            [0,255,255,255],[0,64,64,255],[0,192,0,255],[0,0,192,255],
+            [0,200,100,255],[0,100,200,255],[0,50,150,255],[0,0,0,0],
+            [0,150,50,255],[0,80,80,255],[0,20,20,255],[0,1,1,255]
+        ];
+        for (i,rgba) in colors.iter().enumerate() {
+            t.palette[i*4..i*4+4].copy_from_slice(rgba);
+        }
+        assert!(encode_car_pixels(&t,&[255,0,0,255],1,1).is_err());
     }
     #[test]
     fn mask_encoding_uses_original_grayscale_palette_order() {

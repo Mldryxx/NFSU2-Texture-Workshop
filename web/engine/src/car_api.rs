@@ -1,5 +1,5 @@
 //! WebAssembly-facing API for the independent NFSU2 car TPK engine.
-use crate::car_encode::replace_car_texture_slots;
+use crate::car_encode::{replace_car_texture_slots,replace_car_texture_slots_with_mask};
 use crate::nfsu2::{decode_car_pixels,decode_car_slot,find_car_slot_tables,CarTextureInfo,NfsError,TextureSlot};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -122,7 +122,7 @@ pub fn replace_car_texture_pair_with_status(data:&[u8],base_index:usize,base_rgb
         }
     }
     let textures=[base,mask];
-    let edited=replace_car_texture_slots(data,&textures,&[(0,&merged_base,base_width,base_height),(1,mask_rgba,mask_width,mask_height)]).map_err(fail)?;
+    let edited=replace_car_texture_slots_with_mask(data,&textures,&[(0,&merged_base,base_width,base_height),(1,mask_rgba,mask_width,mask_height)],1).map_err(fail)?;
     let obj=js_sys::Object::new();
     let bytes=js_sys::Uint8Array::from(edited.as_slice());
     js_sys::Reflect::set(&obj,&"data".into(),&bytes.into()).map_err(|_|fail("Gagal membentuk hasil BIN."))?;

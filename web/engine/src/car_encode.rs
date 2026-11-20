@@ -163,10 +163,10 @@ fn encode_car_mask_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->
     Ok(out)
 }
 fn remap_palette_background(tex:&CarTextureInfo)->Option<u8> {
-    // A remapped vinyl has 16 distinct active palette vectors (indices 0..15),
-    // with the remaining 240 entries zero. The active set may contain either
-    // one transparent vector or 16 nonzero vectors; in the latter case the
-    // background is still the most-used pixel index, not palette entry 16.
+    // The sample VINYLS.BIN contains 16-color remap palettes whose first 16
+    // entries are unique and whose tail is zero. The transparent index is the
+    // dominant pixel index; it can be a nonzero palette vector, so don't
+    // require a zero RGBA entry inside the active 16.
     if tex.palette.len()!=1024 || !tex.palette[16*4..].iter().all(|&v|v==0) || tex.pixels.iter().any(|&ix|ix>=16) {
         return None;
     }
@@ -200,7 +200,7 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
         if tex.palette.len()==1024 && tex.palette.iter().all(|&v|v==0) {
             return Err(NfsError::Unsupported("vinyl Base palette is all zero; RGB-to-index mapping is not verified"));
         }
-        let mut histogram=[0usize;256;
+        let mut histogram=[0usize;256];
         for &index in tex.pixels.iter().take(count) { histogram[index as usize]+=1; }
         let mut dominant=0usize;
         for i in 1..256 { if histogram[i]>histogram[dominant] { dominant=i; } }

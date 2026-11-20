@@ -324,7 +324,7 @@ pub fn parse_chunks(src:&[u8])->Result<Vec<ChunkNode>,NfsError>{ parse_chunk_ran
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum CarPixelFormat { A8R8G8B8, Dxt1, Dxt3, Dxt5, Indexed8 }
 #[derive(Debug,Clone,PartialEq,Eq)]
-pub struct CarTextureInfo { pub key:u32, pub name:Option<String>, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub pixels:Vec<u8> }
+pub struct CarTextureInfo { pub key:u32, pub name:Option<String>, pub width:u16, pub height:u16, pub format:CarPixelFormat, pub mip_count:u8, pub slot:TextureSlot, pub palette:Vec<u8>, pub pixels:Vec<u8> }
 fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
     match fmt {
         CarPixelFormat::A8R8G8B8=>w*h*4,
@@ -334,7 +334,7 @@ fn mip_size(fmt:CarPixelFormat,w:usize,h:usize)->usize {
     }
 }
 
-fn parse_vinyl_trailer(raw:&[u8],key:u32)->Option<(String,u16,u16,CarPixelFormat,usize)> {
+fn parse_vinyl_trailer(raw:&[u8],key:u32)->Option<(String,u16,u16,CarPixelFormat,usize,usize,usize)> {
     if raw.len()<144 { return None; }
     let rec=&raw[raw.len()-144..];
     let name_bytes=&rec[..24];
@@ -348,13 +348,19 @@ fn parse_vinyl_trailer(raw:&[u8],key:u32)->Option<(String,u16,u16,CarPixelFormat
     let format=match code {0x31545844=>CarPixelFormat::Dxt1,0x33545844=>CarPixelFormat::Dxt3,0x29=>CarPixelFormat::Indexed8,_=>return None};
     let pixel_len=match format {CarPixelFormat::Indexed8=>width as usize*height as usize, _=>mip_size(format,width as usize,height as usize)};
     if pixel_len+144>raw.len(){return None;}
-    Some((String::from_utf8(name_bytes[..name_len].to_vec()).ok()?,width,height,format,pixel_len))
+    let palette_offset=u32::from_le_bytes(rec[0x2c..0x30].try_into().ok()?) as usize;
+    let palette_size=u32::from_le_bytes(rec[0x30..0x34].try_into().ok()?) as usize;
+    if format==CarPixelFormat::Indexed8 {
+        if palette_size!=1024 || palette_offset<pixel_len || palette_offset.checked_add(palette_size)? > raw.len()-144 { return None; }
+    }
+    Some((String::from_utf8(name_bytes[..name_len].to_vec()).ok()?,width,height,format,pixel_len,palette_offset,palette_size))
 }
 pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<CarTextureInfo,NfsError>{
     let raw=decompress_block(slot.block(archive)?,max_output)?;
     if slot.decoded_size!=0 && raw.len()!=slot.decoded_size as usize { return Err(NfsError::Invalid("slot decoded size mismatch")); }
-    if let Some((name,width,height,format,pixel_len))=parse_vinyl_trailer(&raw,slot.key) {
-        return Ok(CarTextureInfo{key:slot.key,name:Some(name),width,height,format,mip_count:1,slot,pixels:raw[..pixel_len].to_vec()});
+    if let Some((name,width,height,format,pixel_len,palette_offset,palette_size))=parse_vinyl_trailer(&raw,slot.key) {
+        let palette=if format==CarPixelFormat::Indexed8 { raw[palette_offset..palette_offset+palette_size].to_vec() } else { Vec::new() };
+        return Ok(CarTextureInfo{key:slot.key,name:Some(name),width,height,format,mip_count:1,slot,palette,pixels:raw[..pixel_len].to_vec()});
     }
     let p=slot.header_offset(raw.len())?;
     let key=u32::from_le_bytes(raw[p..p+4].try_into().unwrap());
@@ -368,7 +374,7 @@ pub fn decode_car_slot(archive:&[u8],slot:TextureSlot,max_output:usize)->Result<
     for _ in 0..16 { let n=mip_size(format,w,h); if total.checked_add(n).filter(|v|*v<=p).is_none(){break;} total+=n;mips+=1;if w==1&&h==1{break;}w=(w/2).max(1);h=(h/2).max(1); }
     if mips==0 { return Err(NfsError::Invalid("no complete mip levels before embedded header")); }
     let name=None;
-    Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,pixels:raw[..total].to_vec()})
+    Ok(CarTextureInfo{key,name,width,height,format,mip_count:mips,slot,palette:Vec::new(),pixels:raw[..total].to_vec()})
 }
 fn rgb565(v:u16)->[u8;3] {
     let r=((v>>11)&31) as u8; let g=((v>>5)&63) as u8; let b=(v&31) as u8;
@@ -399,10 +405,8 @@ pub fn decode_car_pixels(tex:&CarTextureInfo)->Result<Vec<u8>,NfsError> {
     if tex.format==CarPixelFormat::Indexed8 {
         if tex.pixels.len()<w*h{return Err(NfsError::Truncated("indexed vinyl pixels"));}
         let mut hist=[0usize;256];for &v in tex.pixels.iter().take(w*h){hist[v as usize]+=1;}
-        // The vinyl palette is zeroed in the BIN and the game supplies colors at
-        // runtime. For a neutral preview, rank the actual used foreground indices
-        // instead of treating the low nibble as brightness (which aliases
-        // indices 16, 32, etc. and causes speckled/banded previews).
+        // Runtime recoloring is not modeled in this neutral preview. Rank the
+        // actual used foreground indices instead of interpreting the palette.
         let bg=(0..256).max_by_key(|&i|hist[i]).unwrap_or(0) as u8;
         let mut levels:Vec<u8>=(0..256).filter(|&i|i!=bg as usize&&hist[i]>0).map(|i|i as u8).collect();
         levels.sort_unstable();
@@ -572,6 +576,32 @@ mod tests {
         assert_eq!(&tex.pixels[..8],&[1,2,3,4,5,6,7,8]);
     }
     #[test]
+    fn decodes_palette_bytes_from_indexed_vinyl_trailer() {
+        let key=0x55667788u32;
+        let width=8u16;let height=8u16;
+        let palette_offset=64usize;let palette_size=1024usize;
+        let raw_len=palette_offset+palette_size+12+144;
+        let mut raw=vec![0u8;raw_len];
+        for i in 0..256 {
+            let v=((i*73)%256) as u8;
+            raw[palette_offset+i*4..palette_offset+i*4+4].copy_from_slice(&[v,v,v,255]);
+        }
+        let p=raw_len-144;
+        raw[p..p+10].copy_from_slice(b"VINYL_MASK");
+        raw[p+0x18..p+0x1c].copy_from_slice(&key.to_le_bytes());
+        raw[p+0x2c..p+0x30].copy_from_slice(&(palette_offset as u32).to_le_bytes());
+        raw[p+0x30..p+0x34].copy_from_slice(&(palette_size as u32).to_le_bytes());
+        raw[p+0x34..p+0x38].copy_from_slice(&(width as u32*height as u32).to_le_bytes());
+        raw[p+0x38..p+0x3a].copy_from_slice(&width.to_le_bytes());
+        raw[p+0x3a..p+0x3c].copy_from_slice(&height.to_le_bytes());
+        raw[p+0x84..p+0x88].copy_from_slice(&0x29u32.to_le_bytes());
+        let slot=TextureSlot{key,offset:0,compressed_size:raw_len as u32,decoded_size:raw_len as u32,header_from_end:256,unknown:0};
+        let tex=decode_car_slot(&raw,slot,2048).unwrap();
+        assert_eq!(tex.palette,&raw[palette_offset..palette_offset+palette_size]);
+        assert_eq!(tex.palette.len(),1024);
+        assert_eq!(tex.pixels.len(),64);
+    }
+    #[test]
     fn rejects_mismatched_embedded_key() {
         let mut raw=vec![0u8;128];
         raw[8..12].copy_from_slice(&1u32.to_le_bytes());
@@ -584,13 +614,13 @@ mod tests {
     fn decodes_known_dxt1_color_block() {
         let mut pixels=vec![0u8;8];
         pixels.copy_from_slice(&[0x00,0xF8,0x1F,0x00,0b11100100,0,0,0]);
-        let t=CarTextureInfo{key:1,name:None,width:4,height:4,format:CarPixelFormat::Dxt1,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:8,decoded_size:8,header_from_end:0,unknown:0},pixels};
+        let t=CarTextureInfo{key:1,name:None,width:4,height:4,format:CarPixelFormat::Dxt1,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:8,decoded_size:8,header_from_end:0,unknown:0},palette:Vec::new(),pixels};
         let rgba=decode_car_pixels(&t).unwrap();
         assert_eq!(&rgba[..16],&[255,0,0,255,0,0,255,255,170,0,85,255,85,0,170,255]);
     }
     #[test]
     fn decodes_argb8_channel_order() {
-        let t=CarTextureInfo{key:1,name:None,width:1,height:1,format:CarPixelFormat::A8R8G8B8,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},pixels:vec![3,2,1,4]};
+        let t=CarTextureInfo{key:1,name:None,width:1,height:1,format:CarPixelFormat::A8R8G8B8,mip_count:1,slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},palette:Vec::new(),pixels:vec![3,2,1,4]};
         assert_eq!(decode_car_pixels(&t).unwrap(),vec![1,2,3,4]);
     }
 
@@ -631,7 +661,7 @@ mod tests {
             key:1,name:Some("VINYL_LEVELS".into()),width:4,height:1,
             format:CarPixelFormat::Indexed8,mip_count:1,
             slot:TextureSlot{key:1,offset:0,compressed_size:4,decoded_size:4,header_from_end:0,unknown:0},
-            pixels:vec![250,250,16,32],
+            palette:Vec::new(),pixels:vec![250,250,16,32],
         };
         let rgba=decode_car_pixels(&t).unwrap();
         assert_eq!(rgba[3],0); // dominant transparent background
@@ -648,7 +678,7 @@ mod tests {
             key:1,name:Some("VINYL_TEST".into()),width:4,height:4,
             format:CarPixelFormat::Indexed8,mip_count:1,
             slot:TextureSlot{key:1,offset:0,compressed_size:16,decoded_size:16,header_from_end:0,unknown:0},
-            pixels:vec![0,0,0,0,0,1,1,0,0,1,2,0,0,0,0,0],
+            palette:Vec::new(),pixels:vec![0,0,0,0,0,1,1,0,0,1,2,0,0,0,0,0],
         };
         let rgba=decode_car_pixels(&t).unwrap();
         assert_eq!(rgba.len(),64);

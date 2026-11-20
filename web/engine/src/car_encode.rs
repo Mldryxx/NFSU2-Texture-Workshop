@@ -163,10 +163,23 @@ fn encode_car_mask_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->
     Ok(out)
 }
 fn remap_palette_background(tex:&CarTextureInfo)->Option<u8> {
-    if tex.palette.len()!=1024 { return None; }
-    let zero_indices=(0..16).filter(|&i|tex.palette[i*4..i*4+4].iter().all(|&v|v==0)).collect::<Vec<_>>();
-    if zero_indices.len()!=1 || !tex.palette[16*4..].iter().all(|&v|v==0) { return None; }
-    Some(zero_indices[0] as u8)
+    // A remapped vinyl has 16 distinct active palette vectors (indices 0..15),
+    // with the remaining 240 entries zero. The active set may contain either
+    // one transparent vector or 16 nonzero vectors; in the latter case the
+    // background is still the most-used pixel index, not palette entry 16.
+    if tex.palette.len()!=1024 || !tex.palette[16*4..].iter().all(|&v|v==0) || tex.pixels.iter().any(|&ix|ix>=16) {
+        return None;
+    }
+    for i in 0..16 {
+        if (0..i).any(|j|tex.palette[i*4..i*4+4]==tex.palette[j*4..j*4+4) {
+            return None;
+        }
+    }
+    let mut histogram=[0usize;16];
+    for &ix in &tex.pixels { histogram[ix as usize]+=1; }
+    let mut dominant=0usize;
+    for i in 1..16 { if histogram[i]>histogram[dominant] { dominant=i; } }
+    Some(dominant as u8)
 }
 pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
     if width!=tex.width as u32 || height!=tex.height as u32 {
@@ -181,14 +194,13 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
             return encode_car_mask_pixels(tex,rgba,width,height);
         }
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
-        // Stock runtime-recolored vinyls can carry an all-zero P8 palette.
-        // Nearest-RGB quantization against that palette collapses every opaque
-        // texel to index 0, so reject it until the real index/remap semantics
-        // are verified instead of silently producing a blank or corrupt vinyl.
+        // Reject an all-zero P8 palette: nearest-color quantization against it
+        // would collapse every opaque pixel to the first index and silently
+        // produce a blank/corrupt vinyl. Such a palette has no verified mapping.
         if tex.palette.len()==1024 && tex.palette.iter().all(|&v|v==0) {
             return Err(NfsError::Unsupported("vinyl Base palette is all zero; RGB-to-index mapping is not verified"));
         }
-        let mut histogram=[0usize;256];
+        let mut histogram=[0usize;256;
         for &index in tex.pixels.iter().take(count) { histogram[index as usize]+=1; }
         let mut dominant=0usize;
         for i in 1..256 { if histogram[i]>histogram[dominant] { dominant=i; } }
@@ -200,7 +212,8 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
             for i in 0..16 {
                 if Some(i as u8)==remap_background { continue; }
                 for channel in 0..3 {
-                    remap_max[channel]=remap_max[channel].max(tex.palette[i*4+channel]);
+                    // P8 palette bytes are BGRA in memory; convert to RGB weights.
+                    remap_max[channel]=remap_max[channel].max(tex.palette[i*4+(2-channel)]);
                 }
             }
         }
@@ -216,9 +229,10 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
                 let mut best=0usize;let mut best_dist=u32::MAX;
                 for i in 0..candidates {
                     let q=&tex.palette[i*4..i*4+4];
-                    let dr=p[0] as i32-q[0] as i32;
+                    // Original P8 palette is BGRA (red/blue swapped).
+                    let dr=p[0] as i32-q[2] as i32;
                     let dg=p[1] as i32-q[1] as i32;
-                    let db=p[2] as i32-q[2] as i32;
+                    let db=p[2] as i32-q[0] as i32;
                     let dist=(dr*dr+dg*dg+db*db) as u32;
                     if dist<best_dist {best=i;best_dist=dist;}
                 }
@@ -397,7 +411,8 @@ mod tests {
         for (i,rgba) in colors.iter().enumerate() {
             t.palette[i*4..i*4+4].copy_from_slice(rgba);
         }
-        assert!(encode_car_pixels(&t,&[255,0,0,255],1,1).is_err());
+        // Palette byte 0 (blue) is unavailable; reject a blue edit.
+        assert!(encode_car_pixels(&t,&[0,0,255,255],1,1).is_err());
     }
     #[test]
     fn mask_encoding_uses_original_grayscale_palette_order() {
@@ -421,11 +436,12 @@ mod tests {
         let mut t=texture(CarPixelFormat::Indexed8,4,1,1);
         t.pixels=vec![11;4];
         t.palette=vec![0;1024];
+        // Palette vectors are BGRA; RGB channels must be swapped when matching.
         let palette_colors=[
-            [255,255,255,255], [255,0,0,255], [0,255,0,255], [0,0,255,255],
-            [128,0,0,255], [0,128,0,255], [0,0,128,255], [255,255,0,255],
-            [0,255,255,255], [255,0,255,255], [64,64,64,255], [0,0,0,0],
-            [128,128,0,255], [0,128,128,255], [128,0,128,255], [255,255,255,255]
+            [255,255,255,255], [0,0,255,255], [0,255,0,255], [255,0,0,255],
+            [0,0,128,255], [0,128,0,255], [128,0,0,255], [0,255,255,255],
+            [255,255,0,255], [255,0,255,255], [64,64,64,255], [0,0,0,0],
+            [0,128,128,255], [128,128,0,255], [128,0,128,255], [0,1,1,255]
         ];
         for (i,rgba) in palette_colors.iter().enumerate() {
             t.palette[i*4..i*4+4].copy_from_slice(rgba);
@@ -433,6 +449,25 @@ mod tests {
         let input=[255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,0];
         let encoded=encode_car_pixels(&t,&input,4,1).unwrap();
         assert_eq!(encoded,[1,2,3,11]);
+    }
+    #[test]
+    fn remap_palette_with_zero_tail_and_sixteen_nonzero_vectors_limits_candidates() {
+        let mut t=texture(CarPixelFormat::Indexed8,5,1,1);
+        t.pixels=vec![12;5];
+        t.palette=vec![0;1024];
+        let colors=[
+            [255,255,255,255], [0,0,255,255], [0,255,0,255], [255,0,0,255],
+            [0,255,255,255], [255,255,0,255], [255,0,255,255], [32,32,32,255],
+            [64,64,64,255], [128,128,128,255], [0,128,128,255], [128,0,128,255],
+            [0,64,64,255], [64,0,64,255], [0,0,2,255], [1,1,1,255]
+        ];
+        for (i,color) in colors.iter().enumerate() {
+            t.palette[i*4..i*4+4].copy_from_slice(color);
+        }
+        let input=[255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255, 0,0,0,0];
+        let encoded=encode_car_pixels(&t,&input,5,1).unwrap();
+        // The zeroed tail starts at index 16 and must not be a color candidate.
+        assert_eq!(encoded,[1,2,3,15,12]);
     }
     #[test]
     fn mask_encoder_uses_green_channel_and_ignores_palette_alpha_and_rgb() {

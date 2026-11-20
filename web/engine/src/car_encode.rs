@@ -160,6 +160,12 @@ fn encode_car_mask_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->
     }
     Ok(out)
 }
+fn remap_palette_background(tex:&CarTextureInfo)->Option<u8> {
+    if tex.palette.len()!=1024 { return None; }
+    let zero_indices=(0..16).filter(|&i|tex.palette[i*4..i*4+4].iter().all(|&v|v==0)).collect::<Vec<_>>();
+    if zero_indices.len()!=1 || !tex.palette[16*4..].iter().all(|&v|v==0) { return None; }
+    Some(zero_indices[0] as u8)
+}
 pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
     if width!=tex.width as u32 || height!=tex.height as u32 {
         return Err(NfsError::Invalid("replacement dimensions differ from target texture"));
@@ -173,20 +179,34 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
             return encode_car_mask_pixels(tex,rgba,width,height);
         }
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
-        // The transparent index is texture-specific. In the decoded stock sample,
-        // colorable vinyls such as TEAR_012 and TEAR_038 use different dominant
-        // indices (11 and 6), and each index's palette entry is zero. Preserve
-        // the original dominant index for transparent replacement pixels.
-        // The opaque RGB-to-shade mapping remains provisional and is not claimed
-        // to reproduce the game's color-remap semantics.
+        // A remap vinyl's P8 palette stores RGB weight vectors for the
+        // selected VINYL_COLOUR channels. Quantize edited RGB to those vectors;
+        // luminance-only indexing loses which paint channel each pixel uses.
+        // The zero palette entry is the per-texture background index.
         let mut histogram=[0usize;256];
         for &index in tex.pixels.iter().take(count) { histogram[index as usize]+=1; }
-        let mut background=0usize;
-        for i in 1..256 { if histogram[i]>histogram[background] { background=i; } }
+        let mut dominant=0usize;
+        for i in 1..256 { if histogram[i]>histogram[dominant] { dominant=i; } }
+        let remap_background=remap_palette_background(tex);
+        let background=remap_background.unwrap_or(dominant as u8);
+        let candidates=if remap_background.is_some() {16usize} else {256usize};
+        let has_palette=tex.palette.len()==1024;
         let mut out=Vec::with_capacity(count);
         for p in rgba.chunks_exact(4) {
-            if p[3]<128 {out.push(background as u8);}
-            else {
+            if p[3]<128 {out.push(background);}
+            else if has_palette {
+                let mut best=0usize;let mut best_dist=u32::MAX;
+                for i in 0..candidates {
+                    let q=&tex.palette[i*4..i*4+4];
+                    let dr=p[0] as i32-q[0] as i32;
+                    let dg=p[1] as i32-q[1] as i32;
+                    let db=p[2] as i32-q[2] as i32;
+                    let dist=(dr*dr+dg*dg+db*db) as u32;
+                    if dist<best_dist {best=i;best_dist=dist;}
+                }
+                out.push(best as u8);
+            } else {
+                // Legacy fallback for synthetic/older texture metadata without a palette.
                 let lum=(77u32*p[0] as u32+150u32*p[1] as u32+29u32*p[2] as u32+128)/256;
                 out.push(1+((lum*14+127)/255) as u8);
             }
@@ -359,6 +379,24 @@ mod tests {
         let rgba=[0,0,0,255,255,255,255,255,128,128,128,255,255,255,255,0];
         let indices=encode_car_pixels(&t,&rgba,4,1).unwrap();
         assert_eq!(indices,[black,white,mid,black]);
+    }
+    #[test]
+    fn remap_palette_encoding_preserves_rgb_weight_channels() {
+        let mut t=texture(CarPixelFormat::Indexed8,4,1,1);
+        t.pixels=vec![11;4];
+        t.palette=vec![0;1024];
+        let palette_colors=[
+            [255,255,255,255], [255,0,0,255], [0,255,0,255], [0,0,255,255],
+            [128,0,0,255], [0,128,0,255], [0,0,128,255], [255,255,0,255],
+            [0,255,255,255], [255,0,255,255], [64,64,64,255], [0,0,0,0],
+            [128,128,0,255], [0,128,128,255], [128,0,128,255], [255,255,255,255]
+        ];
+        for (i,rgba) in palette_colors.iter().enumerate() {
+            t.palette[i*4..i*4+4].copy_from_slice(rgba);
+        }
+        let input=[255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,0];
+        let encoded=encode_car_pixels(&t,&input,4,1).unwrap();
+        assert_eq!(encoded,[1,2,3,11]);
     }
     #[test]
     fn mask_encoder_rejects_non_grayscale_palette() {

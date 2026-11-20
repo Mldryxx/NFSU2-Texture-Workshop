@@ -179,10 +179,10 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
             return encode_car_mask_pixels(tex,rgba,width,height);
         }
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
-        // A remap vinyl's P8 palette stores RGB weight vectors for the
-        // selected VINYL_COLOUR channels. Quantize edited RGB to those vectors;
-        // luminance-only indexing loses which paint channel each pixel uses.
-        // The zero palette entry is the per-texture background index.
+        // Vinyl RGB values are remap weights for the three VINYL_COLOUR
+        // channels (verified in the open-source static-analysis compositor).
+        // Quantize edited RGB to the original palette vectors instead of
+        // luminance, which destroys the channel selection.
         let mut histogram=[0usize;256];
         for &index in tex.pixels.iter().take(count) { histogram[index as usize]+=1; }
         let mut dominant=0usize;
@@ -190,11 +190,10 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
         let remap_background=remap_palette_background(tex);
         let background=remap_background.unwrap_or(dominant as u8);
         let candidates=if remap_background.is_some() {16usize} else {256usize};
-        let has_palette=tex.palette.len()==1024;
         let mut out=Vec::with_capacity(count);
         for p in rgba.chunks_exact(4) {
             if p[3]<128 {out.push(background);}
-            else if has_palette {
+            else if tex.palette.len()==1024 {
                 let mut best=0usize;let mut best_dist=u32::MAX;
                 for i in 0..candidates {
                     let q=&tex.palette[i*4..i*4+4];
@@ -379,6 +378,24 @@ mod tests {
         let rgba=[0,0,0,255,255,255,255,255,128,128,128,255,255,255,255,0];
         let indices=encode_car_pixels(&t,&rgba,4,1).unwrap();
         assert_eq!(indices,[black,white,mid,black]);
+    }
+    #[test]
+    fn remap_palette_encoding_preserves_rgb_weight_channels() {
+        let mut t=texture(CarPixelFormat::Indexed8,4,1,1);
+        t.pixels=vec![11;4];
+        t.palette=vec![0;1024];
+        let palette_colors=[
+            [255,255,255,255], [255,0,0,255], [0,255,0,255], [0,0,255,255],
+            [128,0,0,255], [0,128,0,255], [0,0,128,255], [255,255,0,255],
+            [0,255,255,255], [255,0,255,255], [64,64,64,255], [0,0,0,0],
+            [128,128,0,255], [0,128,128,255], [128,0,128,255], [255,255,255,255]
+        ];
+        for (i,rgba) in palette_colors.iter().enumerate() {
+            t.palette[i*4..i*4+4].copy_from_slice(rgba);
+        }
+        let input=[255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,0];
+        let encoded=encode_car_pixels(&t,&input,4,1).unwrap();
+        assert_eq!(encoded,[1,2,3,11]);
     }
     #[test]
     fn remap_palette_encoding_preserves_rgb_weight_channels() {

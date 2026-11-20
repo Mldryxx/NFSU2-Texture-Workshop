@@ -409,24 +409,7 @@ mod tests {
         let indices=encode_car_pixels(&t,&rgba,4,1).unwrap();
         assert_eq!(indices,[black,white,mid,black]);
     }
-    #[test]
-    fn remap_palette_encoding_preserves_rgb_weight_channels() {
-        let mut t=texture(CarPixelFormat::Indexed8,4,1,1);
-        t.pixels=vec![11;4];
-        t.palette=vec![0;1024];
-        let palette_colors=[
-            [255,255,255,255], [255,0,0,255], [0,255,0,255], [0,0,255,255],
-            [128,0,0,255], [0,128,0,255], [0,0,128,255], [255,255,0,255],
-            [0,255,255,255], [255,0,255,255], [64,64,64,255], [0,0,0,0],
-            [128,128,0,255], [0,128,128,255], [128,0,128,255], [255,255,255,255]
-        ];
-        for (i,rgba) in palette_colors.iter().enumerate() {
-            t.palette[i*4..i*4+4].copy_from_slice(rgba);
-        }
-        let input=[255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,0];
-        let encoded=encode_car_pixels(&t,&input,4,1).unwrap();
-        assert_eq!(encoded,[1,2,3,11]);
-    }
+
     #[test]
     fn remap_palette_encoding_preserves_rgb_weight_channels() {
         let mut t=texture(CarPixelFormat::Indexed8,4,1,1);

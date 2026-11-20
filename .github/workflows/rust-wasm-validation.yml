@@ -1,0 +1,19 @@
+name: Rust and WebAssembly validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Run native Rust tests
+        run: cargo test --manifest-path web/engine/Cargo.toml
+      - name: Build WebAssembly engine
+        run: cargo build --manifest-path web/engine/Cargo.toml --release --target wasm32-unknown-unknown

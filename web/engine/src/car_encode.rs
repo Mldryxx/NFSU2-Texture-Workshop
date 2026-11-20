@@ -122,6 +122,44 @@ fn encode_level(fmt:CarPixelFormat,rgba:&[[u8;4]],w:usize,h:usize)->Vec<u8> {
     }}
     out
 }
+fn is_mask_texture_name(name:Option<&str>)->bool {
+    let n=name.unwrap_or("").trim();
+    n.ends_with("_MASK") || (n.len()==24 && (n.ends_with("_MA") || n.ends_with("_MAS")))
+}
+fn encode_car_mask_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
+    if width!=tex.width as u32 || height!=tex.height as u32 {
+        return Err(NfsError::Invalid("replacement dimensions differ from target texture"));
+    }
+    let count=(width as usize).checked_mul(height as usize).ok_or(NfsError::OutOfRange)?;
+    if rgba.len()!=count.checked_mul(4).ok_or(NfsError::OutOfRange)? {
+        return Err(NfsError::Invalid("replacement buffer must be RGBA8"));
+    }
+    if tex.format!=CarPixelFormat::Indexed8 { return Err(NfsError::Unsupported("vinyl mask must use Indexed8")); }
+    if tex.pixels.len()!=count { return Err(NfsError::Invalid("indexed slot pixel length mismatch")); }
+    if tex.palette.len()!=1024 { return Err(NfsError::Invalid("indexed mask palette is missing")); }
+    // Stock masks are P8 with a shuffled, full 256-entry grayscale palette.
+    // Convert grayscale input through that palette so white/black do not
+    // incorrectly become indices 15/1 (which are arbitrary gray values).
+    let mut palette_gray=[0u8;256];
+    for (i,p) in tex.palette.chunks_exact(4).enumerate() {
+        if p[0]!=p[1] || p[1]!=p[2] || p[3]!=255 {
+            return Err(NfsError::Unsupported("vinyl mask palette is not opaque grayscale"));
+        }
+        palette_gray[i]=p[0];
+    }
+    let mut out=Vec::with_capacity(count);
+    for p in rgba.chunks_exact(4) {
+        let lum=(77u32*p[0] as u32+150u32*p[1] as u32+29u32*p[2] as u32+128)/256;
+        let target=(lum*p[3] as u32+127)/255;
+        let mut best=0usize;let mut best_delta=256u32;
+        for (i,&gray) in palette_gray.iter().enumerate() {
+            let delta=if gray as u32>target {gray as u32-target} else {target-gray as u32};
+            if delta<best_delta {best=i;best_delta=delta;}
+        }
+        out.push(best as u8);
+    }
+    Ok(out)
+}
 pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->Result<Vec<u8>,NfsError> {
     if width!=tex.width as u32 || height!=tex.height as u32 {
         return Err(NfsError::Invalid("replacement dimensions differ from target texture"));
@@ -131,6 +169,9 @@ pub fn encode_car_pixels(tex:&CarTextureInfo,rgba:&[u8],width:u32,height:u32)->R
         return Err(NfsError::Invalid("replacement buffer must be RGBA8"));
     }
     if tex.format==CarPixelFormat::Indexed8 {
+        if is_mask_texture_name(tex.name.as_deref()) {
+            return encode_car_mask_pixels(tex,rgba,width,height);
+        }
         if tex.pixels.len()!=count {return Err(NfsError::Invalid("indexed slot pixel length mismatch"));}
         // The transparent index is texture-specific. In the decoded stock sample,
         // colorable vinyls such as TEAR_012 and TEAR_038 use different dominant
@@ -176,9 +217,30 @@ pub fn replace_car_texture_slots(
     textures:&[CarTextureInfo],
     replacements:&[(usize,&[u8],u32,u32)],
 )->Result<Vec<u8>,NfsError> {
+    replace_car_texture_slots_internal(archive,textures,replacements,None)
+}
+pub fn replace_car_texture_slots_with_mask(
+    archive:&[u8],
+    textures:&[CarTextureInfo],
+    replacements:&[(usize,&[u8],u32,u32)],
+    mask_index:usize,
+)->Result<Vec<u8>,NfsError> {
+    replace_car_texture_slots_internal(archive,textures,replacements,Some(mask_index))
+}
+fn replace_car_texture_slots_internal(
+    archive:&[u8],
+    textures:&[CarTextureInfo],
+    replacements:&[(usize,&[u8],u32,u32)],
+    mask_index:Option<usize>,
+)->Result<Vec<u8>,NfsError> {
     use crate::nfsu2::{compress_jdlz,decompress_block,find_car_slot_tables,parse_chunks};
     use std::collections::HashSet;
     if replacements.is_empty() {return Err(NfsError::Invalid("no texture replacements supplied"));}
+    if let Some(mi)=mask_index {
+        if !replacements.iter().any(|(index,_,_,_)|*index==mi) {
+            return Err(NfsError::Invalid("mask index is not part of the replacement set"));
+        }
+    }
     if archive.len()<8 {return Err(NfsError::Truncated("BIN root chunk"));}
     let packs=find_car_slot_tables(archive)?;
     if packs.len()!=1 {return Err(NfsError::Unsupported("replacement currently requires exactly one compressed TPK pack"));}
@@ -204,7 +266,11 @@ pub fn replace_car_texture_slots(
         let slot_index=slots.iter().position(|s|s==&tex.slot).ok_or(NfsError::Invalid("texture slot not present in BIN table"))?;
         let mut raw=decompress_block(tex.slot.block(archive)?,64*1024*1024)?;
         if raw.len()!=tex.slot.decoded_size as usize {return Err(NfsError::Invalid("decoded slot size changed"));}
-        let encoded=encode_car_pixels(tex,rgba,*w,*h)?;
+        let encoded=if mask_index==Some(*index) {
+            encode_car_mask_pixels(tex,rgba,*w,*h)?
+        } else {
+            encode_car_pixels(tex,rgba,*w,*h)?
+        };
         if encoded.len()!=tex.pixels.len() || encoded.len()>raw.len() {return Err(NfsError::Invalid("replacement pixel extent is invalid"));}
         raw[..encoded.len()].copy_from_slice(&encoded);
         let packed=compress_jdlz(&raw)?;
@@ -251,7 +317,7 @@ mod tests {
             size+=match fmt {CarPixelFormat::A8R8G8B8=>x*y*4,CarPixelFormat::Dxt1=>((x+3)/4)*((y+3)/4)*8,CarPixelFormat::Dxt3|CarPixelFormat::Dxt5=>((x+3)/4)*((y+3)/4)*16,CarPixelFormat::Indexed8=>x*y};
             x=(x/2).max(1);y=(y/2).max(1);
         }
-        CarTextureInfo{key:1,name:None,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},pixels:vec![0;size]}
+        CarTextureInfo{key:1,name:None,width:w,height:h,format:fmt,mip_count:mips,slot:TextureSlot{key:1,offset:0,compressed_size:0,decoded_size:0,header_from_end:0,unknown:0},palette:Vec::new(),pixels:vec![0;size]}
     }
     #[test]
     fn converts_rgba_to_vinyl_palette_indices_and_alpha_background() {
@@ -278,6 +344,29 @@ mod tests {
         let indices=encode_car_pixels(&t,&rgba,4,4).unwrap();
         assert_eq!(indices[0],11);
         assert_eq!(indices[1],15);
+    }
+    #[test]
+    fn mask_encoding_uses_original_grayscale_palette_order() {
+        let mut t=texture(CarPixelFormat::Indexed8,4,1,1);
+        t.name=Some("TEST_MASK".into());
+        for i in 0..256 {
+            let gray=((i*73)%256) as u8;
+            t.palette.extend_from_slice(&[gray,gray,gray,255]);
+        }
+        let black=(0..256).find(|&i|t.palette[i*4]==0).unwrap() as u8;
+        let white=(0..256).find(|&i|t.palette[i*4]==255).unwrap() as u8;
+        let mid=(0..256).find(|&i|t.palette[i*4]==128).unwrap() as u8;
+        let rgba=[0,0,0,255,255,255,255,255,128,128,128,255,255,255,255,0];
+        let indices=encode_car_pixels(&t,&rgba,4,1).unwrap();
+        assert_eq!(indices,[black,white,mid,black]);
+    }
+    #[test]
+    fn mask_encoder_rejects_non_grayscale_palette() {
+        let mut t=texture(CarPixelFormat::Indexed8,1,1,1);
+        t.palette=vec![0,0,0,255].repeat(256);
+        t.palette[4..8].copy_from_slice(&[0,2,0,255]);
+        let rgba=[255,255,255,255];
+        assert!(encode_car_mask_pixels(&t,&rgba,1,1).is_err());
     }
     #[test]
     fn encodes_all_car_formats_and_mips_to_exact_slot_size() {

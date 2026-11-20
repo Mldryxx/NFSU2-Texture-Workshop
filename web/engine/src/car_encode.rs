@@ -171,7 +171,7 @@ fn remap_palette_background(tex:&CarTextureInfo)->Option<u8> {
         return None;
     }
     for i in 0..16 {
-        if (0..i).any(|j|tex.palette[i*4..i*4+4]==tex.palette[j*4..j*4+4) {
+        if (0..i).any(|j|tex.palette[i*4..i*4+4]==tex.palette[j*4..j*4+4]) {
             return None;
         }
     }
